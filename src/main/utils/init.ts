@@ -25,10 +25,12 @@ import { stringifyYaml } from './yaml'
 import { mkdir, writeFile, cp, rm, readdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
+import net from 'net'
 import {
   startPacServer,
   startSubStoreBackendServer,
-  startSubStoreFrontendServer
+  startSubStoreFrontendServer,
+  findAvailablePort
 } from '../resolve/server'
 import { isHelperInstalled, triggerSysProxy } from '../sys/sysproxy'
 import {
@@ -82,7 +84,32 @@ async function initConfig(): Promise<void> {
     await writeFile(profilePath('default'), stringifyYaml(defaultProfile))
   }
   if (!existsSync(controledMihomoConfigPath())) {
-    await writeFile(controledMihomoConfigPath(), stringifyYaml(defaultControledMihomoConfig))
+    // Check if default port 7890 is available, if not, find an available port
+    let availablePort = 7890
+    
+    // Check if port 7890 is in use
+    const isPortAvailable = await new Promise<boolean>((resolve) => {
+      const server = net.createServer()
+      server.once('error', () => resolve(false))
+      server.once('listening', () => {
+        server.close(() => resolve(true))
+      })
+      server.listen(7890, '127.0.0.1')
+    })
+    
+    if (!isPortAvailable) {
+      // Port 7890 is in use, find an available port
+      try {
+        availablePort = await findAvailablePort(7890)
+        console.log(`[Init] Port 7890 is in use, using port ${availablePort} instead`)
+      } catch (error) {
+        console.error('[Init] Failed to find available port:', error)
+      }
+    }
+    
+    const configWithPort = { ...defaultControledMihomoConfig }
+    configWithPort['mixed-port'] = availablePort
+    await writeFile(controledMihomoConfigPath(), stringifyYaml(configWithPort))
   }
 }
 
@@ -236,11 +263,13 @@ function initDeeplink(): void {
       app.setAsDefaultProtocolClient('clash', process.execPath, [path.resolve(process.argv[1])])
       app.setAsDefaultProtocolClient('mihomo', process.execPath, [path.resolve(process.argv[1])])
       app.setAsDefaultProtocolClient('sparkle', process.execPath, [path.resolve(process.argv[1])])
+      app.setAsDefaultProtocolClient('crowvpn', process.execPath, [path.resolve(process.argv[1])])
     }
   } else {
     app.setAsDefaultProtocolClient('clash')
     app.setAsDefaultProtocolClient('mihomo')
     app.setAsDefaultProtocolClient('sparkle')
+    app.setAsDefaultProtocolClient('crowvpn')
   }
 }
 

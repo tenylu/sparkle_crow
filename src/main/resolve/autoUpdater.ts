@@ -6,8 +6,7 @@ import { dataDir, exeDir, exePath, isPortable, resourcesFilesDir } from '../util
 import { copyFile, rm, writeFile, readFile } from 'fs/promises'
 import path from 'path'
 import { existsSync } from 'fs'
-import { exec, spawn } from 'child_process'
-import { promisify } from 'util'
+import { spawn } from 'child_process'
 import { createHash } from 'crypto'
 import { setNotQuitDialog, mainWindow } from '..'
 import { disableSysProxy } from '../sys/sysproxy'
@@ -17,10 +16,14 @@ let downloadCancelToken: CancelTokenSource | null = null
 export async function checkUpdate(): Promise<AppVersion | undefined> {
   const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
   const { updateChannel = 'stable' } = await getAppConfig()
-  let url = 'https://github.com/xishang0128/sparkle/releases/latest/download/latest.yml'
+  
+  // Cloudflare R2 URL - replace with your actual R2 bucket URL
+  const baseUrl = 'https://update.crowmesh.com'
+  let url = `${baseUrl}/latest.yml`
   if (updateChannel == 'beta') {
-    url = 'https://github.com/xishang0128/sparkle/releases/download/pre-release/latest.yml'
+    url = `${baseUrl}/latest-beta.yml`
   }
+  
   const res = await axios.get(url, {
     headers: { 'Content-Type': 'application/octet-stream' },
     ...(mixedPort != 0 && {
@@ -30,6 +33,7 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
         port: mixedPort
       }
     }),
+    validateStatus: () => true,
     responseType: 'text'
   })
   const latest = parseYaml<AppVersion>(res.data)
@@ -43,16 +47,14 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
 
 export async function downloadAndInstallUpdate(version: string): Promise<void> {
   const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
-  let releaseTag = version
-  if (version.includes('beta')) {
-    releaseTag = 'pre-release'
-  }
-  const baseUrl = `https://github.com/xishang0128/sparkle/releases/download/${releaseTag}/`
+  
+  // Cloudflare R2 URL
+  const baseUrl = 'https://update.crowmesh.com'
   const fileMap = {
-    'win32-x64': `sparkle-windows-${version}-x64-setup.exe`,
-    'win32-arm64': `sparkle-windows-${version}-arm64-setup.exe`,
-    'darwin-x64': `sparkle-macos-${version}-x64.pkg`,
-    'darwin-arm64': `sparkle-macos-${version}-arm64.pkg`
+    'win32-x64': `crowvpn-windows-${version}-x64-setup.exe`,
+    'win32-arm64': `crowvpn-windows-${version}-arm64-setup.exe`,
+    'darwin-x64': `crowvpn-macos-${version}-x64.pkg`,
+    'darwin-arm64': `crowvpn-macos-${version}-arm64.pkg`
   }
   let file = fileMap[`${process.platform}-${process.arch}`]
   if (isPortable()) {
@@ -63,9 +65,9 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
   }
   downloadCancelToken = axios.CancelToken.source()
 
-  const apiUrl = `https://api.github.com/repos/xishang0128/sparkle/releases/tags/${releaseTag}`
-  const apiRequestConfig: AxiosRequestConfig = {
-    headers: { Accept: 'application/vnd.github.v3+json' },
+  // Read hash from R2 metadata file
+  const hashUrl = `${baseUrl}/${file}.sha256`
+  const hashRequestConfig: AxiosRequestConfig = {
     ...(mixedPort != 0 && {
       proxy: {
         protocol: 'http',
@@ -73,7 +75,8 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
         port: mixedPort
       }
     }),
-    cancelToken: downloadCancelToken.token
+    validateStatus: () => true,
+    responseType: 'text'
   }
 
   try {
@@ -82,16 +85,11 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
       progress: 0
     })
 
-    const releaseRes = await axios.get(apiUrl, apiRequestConfig)
-    const assets: Array<{ name: string; digest?: string }> = releaseRes.data.assets || []
-    const matchedAsset = assets.find((a) => a.name === file)
-    if (!matchedAsset || !matchedAsset.digest) {
-      throw new Error(`无法从 GitHub Release 中找到 "${file}" 对应的 SHA-256 信息`)
-    }
-    const expectedHash = matchedAsset.digest.split(':')[1].toLowerCase()
+    const hashRes = await axios.get(hashUrl, hashRequestConfig)
+    const expectedHash = hashRes.data.trim().split(/\s+/)[0].toLowerCase()
 
     if (!existsSync(path.join(dataDir(), file))) {
-      const res = await axios.get(`${baseUrl}${file}`, {
+      const res = await axios.get(`${baseUrl}/${file}`, {
         responseType: 'arraybuffer',
         ...(mixedPort != 0 && {
           proxy: {
@@ -100,6 +98,7 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
             port: mixedPort
           }
         }),
+        validateStatus: () => true,
         headers: {
           'Content-Type': 'application/octet-stream'
         },
@@ -131,6 +130,12 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
       progress: 100
     })
 
+    // Send installing status before starting installer
+    mainWindow?.webContents.send('update-status', {
+      downloading: true, // Using downloading flag for installing state
+      progress: 0 // Progress 0 indicates installing phase
+    })
+
     disableSysProxy(false)
     if (file.endsWith('.exe')) {
       spawn(path.join(dataDir(), file), ['/S', '--force-run'], {
@@ -156,13 +161,17 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
     }
     if (file.endsWith('.pkg')) {
       try {
-        const execPromise = promisify(exec)
-        const shell = `installer -pkg ${path.join(dataDir(), file).replace(' ', '\\\\ ')} -target /`
-        const command = `do shell script "${shell}" with administrator privileges`
-        await execPromise(`osascript -e '${command}'`)
-        app.relaunch()
+        const pkgPath = path.join(dataDir(), file)
+        
+        // Use open command to launch the pkg installer
+        // This will use the system installer which already has proper branding
         setNotQuitDialog()
         app.quit()
+        
+        // Wait a bit for the app to quit, then open the installer
+        setTimeout(() => {
+          shell.openPath(pkgPath)
+        }, 500)
       } catch {
         shell.openPath(path.join(dataDir(), file))
       }

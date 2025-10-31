@@ -1,0 +1,426 @@
+--- /dev/null
++++ package.json
+@@ -1,0 +1,11 @@
+   "dependencies": {
++    "electron-store": "^10.0.0",
++    "@types/electron-store": "^3.0.0",
++
+   },
+   "devDependencies": {
++    "@types/electron-store": "^3.0.0",
+
+--- /dev/null
++++ src/shared/types/xboard.d.ts
+@@ -0,0 +1,35 @@
++// Xboard/V2Board 相关类型定义
++
++export interface XboardConfig {
++  baseURL: string
++  token: string
++  flag: 'clash' | 'shadowrocket' | 'v2ray'
++  autoStart: boolean
++  lastNodeName?: string
++}
++
++export interface XboardUser {
++  email: string
++  used: number
++  total: number
++  expire_time?: number
++}
++
++export interface XboardSubscribe {
++  subscribe_url: string
++}
++
++export interface XboardNode {
++  name: string
++  type: 'vmess' | 'vless' | 'trojan' | 'shadowsocks'
++  server: string
++  port: number
++  uuid?: string
++  password?: string
++  alterId?: number
++  network?: string
++  [key: string]: string | number | undefined
++}
++
++export interface XboardProxy {
++  proxies?: XboardNode[]
++}
+
+--- /dev/null
++++ src/main/core/xboardService.ts
+@@ -0,0 +1,179 @@
++import axios, { AxiosInstance } from 'axios'
++import { parseYaml } from '../utils/yaml'
++import { XboardConfig, XboardUser, XboardSubscribe, XboardNode, XboardProxy } from '../../shared/types/xboard'
++
++class XboardService {
++  private api: AxiosInstance
++  private config: XboardConfig
++
++  constructor(config: XboardConfig) {
++    this.config = config
++    this.api = axios.create({
++      baseURL: config.baseURL,
++      timeout: 30000,
++      headers: {
++        'Authorization': `Bearer ${config.token}`,
++        'Content-Type': 'application/json'
++      }
++    })
++  }
++
++  /**
++   * 登录
++   */
++  async login(email: string, password: string): Promise<string> {
++    try {
++      const response = await this.api.post('/api/v1/passport/auth/login', {
++        email,
++        password
++      })
++      
++      if (response.data?.data?.token) {
++        return response.data.data.token
++      }
++      
++      throw new Error('登录失败：未获取到token')
++    } catch (error) {
++      if (axios.isAxiosError(error)) {
++        throw new Error(`登录失败: ${error.response?.data?.message || error.message}`)
++      }
++      throw error
++    }
++  }
++
++  /**
++   * 获取用户信息
++   */
++  async getUserInfo(): Promise<XboardUser> {
++    try {
++      const response = await this.api.get('/api/v1/user/info')
++      
++      if (!response.data?.data) {
++        throw new Error('获取用户信息失败')
++      }
++      
++      return {
++        email: response.data.data.email,
++        used: response.data.data.used || 0,
++        total: response.data.data.total || 0,
++        expire_time: response.data.data.expire_time
++      }
++    } catch (error) {
++      if (axios.isAxiosError(error)) {
++        throw new Error(`获取用户信息失败: ${error.response?.data?.message || error.message}`)
++      }
++      throw error
++    }
++  }
++
++  /**
++   * 获取订阅URL
++   */
++  async getSubscribeUrl(): Promise<string> {
++    try {
++      const response = await this.api.get('/api/v1/user/getSubscribe')
++      
++      if (!response.data?.data?.subscribe_url) {
++        throw new Error('获取订阅URL失败')
++      }
++      
++      return response.data.data.subscribe_url
++    } catch (error) {
++      if (axios.isAxiosError(error)) {
++        throw new Error(`获取订阅URL失败: ${error.response?.data?.message || error.message}`)
++      }
++      throw error
++    }
++  }
++
++  /**
++   * 获取订阅内容
++   */
++  async getSubscribeContent(url?: string): Promise<XboardProxy> {
++    try {
++      let subscribeUrl = url
++      
++      if (!subscribeUrl) {
++        subscribeUrl = await this.getSubscribeUrl()
++      }
++      
++      // 添加flag参数
++      const flag = this.config.flag || 'clash'
++      const separator = subscribeUrl.includes('?') ? '&' : '?'
++      const subscribeUrlWithFlag = `${subscribeUrl}${separator}flag=${flag}`
++      
++      // 获取订阅内容
++      const response = await axios.get(subscribeUrlWithFlag, {
++        headers: {
++          'User-Agent': 'SparkleCrow/1.0'
++        },
++        responseType: 'text'
++      })
++      
++      // 解析YAML
++      const proxyConfig = parseYaml<XboardProxy>(response.data)
++      
++      if (!proxyConfig || !proxyConfig.proxies) {
++        throw new Error('订阅内容格式错误')
++      }
++      
++      return proxyConfig
++    } catch (error) {
++      if (axios.isAxiosError(error)) {
++        throw new Error(`获取订阅内容失败: ${error.response?.data?.message || error.message}`)
++      }
++      throw error
++    }
++  }
++
++  /**
++   * 过滤节点（仅VLESS和VMess）
++   */
++  filterNodes(proxies: XboardNode[]): XboardNode[] {
++    return proxies.filter(node => node.type === 'vmess' || node.type === 'vless')
++  }
++
++  /**
++   * 生成Mihomo最小配置
++   */
++  generateMinimalConfig(node: XboardNode): string {
++    const config: Record<string, unknown> = {
++      port: 7890,
++      'socks-port': 7891,
++      'mixed-port': 0,
++      'allow-lan': false,
++      mode: 'rule',
++      'log-level': 'info',
++      proxies: [node],
++      proxyGroups: [
++        {
++          name: 'GLOBAL',
++          type: 'select',
++          proxies: [node.name]
++        }
++      ],
++      rules: [
++        'GEOIP,CN,DIRECT',
++        'MATCH,GLOBAL'
++      ]
++    }
++    
++    // 根据node.type补充必要字段
++    if (node.type === 'vmess') {
++      node.uuid = node.uuid || ''
++      node.cipher = 'auto'
++      node.alterId = node.alterId || 0
++    }
++    
++    if (node.type === 'vless') {
++      node.uuid = node.uuid || ''
++    }
++    
++    const { stringifyYaml } = require('../utils/yaml')
++    return stringifyYaml(config)
++  }
++
++  /**
++   * 更新配置
++   */
++  updateConfig(config: Partial<XboardConfig>): void {
++    this.config = { ...this.config, ...config }
++    this.api = axios.create({
++      baseURL: this.config.baseURL,
++      timeout: 30000,
++      headers: {
++        'Authorization': `Bearer ${this.config.token}`,
++        'Content-Type': 'application/json'
++      }
++    })
++  }
++
++  /**
++   * 登出（清理token）
++   */
++  logout(): void {
++    this.config.token = ''
++    this.api = axios.create({
++      baseURL: this.config.baseURL,
++      timeout: 30000
++    })
++  }
++}
++
++export default XboardService
++export { XboardService }
+
+--- /dev/null
++++ src/main/config/xboard.ts
+@@ -0,0 +1,72 @@
++import Store from 'electron-store'
++import { XboardConfig } from '../../shared/types/xboard'
++
++const store = new Store<XboardConfig>({
++  name: 'xboard',
++  defaults: {
++    baseURL: '',
++    token: '',
++    flag: 'clash',
++    autoStart: true,
++    lastNodeName: undefined
++  }
++})
++
++/**
++ * 获取Xboard配置
++ */
++export function getXboardConfig(): XboardConfig {
++  return store.store
++}
++
++/**
++ * 更新Xboard配置
++ */
++export function setXboardConfig(config: Partial<XboardConfig>): void {
++  const currentConfig = store.store
++  store.store = { ...currentConfig, ...config }
++}
++
++/**
++ * 检查是否已登录
++ */
++export function isLoggedIn(): boolean {
++  const config = store.store
++  return !!(config.baseURL && config.token)
++}
++
++/**
++ * 设置登录信息
++ */
++export function setLoginInfo(baseURL: string, token: string): void {
++  store.set('baseURL', baseURL)
++  store.set('token', token)
++}
++
++/**
++ * 登出（清空登录信息）
++ */
++export function logout(): void {
++  store.set('token', '')
++  store.set('lastNodeName', undefined)
++}
++
++/**
++ * 获取当前节点名称
++ */
++export function getCurrentNodeName(): string | undefined {
++  return store.get('lastNodeName')
++}
++
++/**
++ * 设置当前节点名称
++ */
++export function setCurrentNodeName(name: string | undefined): void {
++  store.set('lastNodeName', name)
++}
+
+--- /dev/null
++++ src/main/utils/ipc.ts
+@@ -1,0 +1,0 @@
++// Xboard相关IPC处理
++import { ipcMain } from 'electron'
++import { getXboardConfig, setXboardConfig, isLoggedIn, setLoginInfo, logout as xboardLogout, setCurrentNodeName, getCurrentNodeName } from '../config/xboard'
++import { XboardService } from '../core/xboardService'
++import { XboardUser, XboardNode, XboardProxy } from '../../shared/types/xboard'
++import { stringifyYaml } from '../utils/yaml'
++import { mihomoWorkConfigPath } from '../utils/dirs'
++import { writeFile } from 'fs/promises'
++import { patchMihomoConfig } from '../core/mihomoApi'
++
++// 获取Xboard服务实例
++let xboardService: XboardService | null = null
++
++function getXboardService(): XboardService {
++  const config = getXboardConfig()
++  if (!xboardService) {
++    xboardService = new XboardService(config)
++  }
++  return xboardService
++}
++
++// IPC handlers
++ipcMain.handle('xboard:login', async (_event, baseURL: string, email: string, password: string): Promise<void> => {
++  try {
++    const service = getXboardService()
++    const token = await service.login(email, password)
++    setLoginInfo(baseURL, token)
++    
++    // 更新service配置
++    xboardService = new XboardService({ ...getXboardConfig(), baseURL, token })
++  } catch (error) {
++    throw new Error(error instanceof Error ? error.message : '登录失败')
++  }
++})
++
++ipcMain.handle('xboard:getUserInfo', async (): Promise<XboardUser> => {
++  const service = getXboardService()
++  return await service.getUserInfo()
++})
++
++ipcMain.handle('xboard:getNodes', async (): Promise<XboardNode[]> => {
++  const service = getXboardService()
++  const proxyConfig = await service.getSubscribeContent()
++  const allNodes = proxyConfig.proxies || []
++  return service.filterNodes(allNodes)
++})
++
++ipcMain.handle('xboard:connect', async (_event, node: XboardNode): Promise<void> => {
++  const service = getXboardService()
++  const configContent = service.generateMinimalConfig(node)
++  
++  // 写入配置文件
++  await writeFile(mihomoWorkConfigPath('work'), configContent, 'utf-8')
++  
++  // 如果内核正在运行，热更新配置
++  const { startCore, stopCore } = require('../core/manager')
++  // 注意：实际项目中需要检查是否已启动
++  // 这里简化处理，假设先停止再启动
++  await stopCore()
++  await startCore()
++  
++  // 保存当前节点名称
++  setCurrentNodeName(node.name)
++})
++
++ipcMain.handle('xboard:disconnect', async (): Promise<void> => {
++  const { stopCore } = require('../core/manager')
++  await stopCore()
++  setCurrentNodeName(undefined)
++})
++
++ipcMain.handle('xboard:logout', async (): Promise<void> => {
++  xboardLogout()
++  xboardService = null
++})
++
++ipcMain.handle('xboard:isLoggedIn', (): boolean => {
++  return isLoggedIn()
++})
++
++ipcMain.handle('xboard:getConfig', (): XboardConfig => {
++  return getXboardConfig()
++})
++
++ipcMain.handle('xboard:setConfig', async (_event, config: Partial<XboardConfig>): Promise<void> => {
++  setXboardConfig(config)
++  if (xboardService) {
++    xboardService.updateConfig(config)
++  }
++})
++
++ipcMain.handle('xboard:getCurrentNodeName', (): string | undefined => {
++  return getCurrentNodeName()
++})

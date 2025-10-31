@@ -1,5 +1,5 @@
-appId: sparkle.app
-productName: Sparkle
+appId: crowvpn.app
+productName: CrowVPN
 directories:
   buildResources: build
 files:
@@ -19,11 +19,12 @@ extraResources:
   - from: './extra/'
     to: ''
 protocols:
-  name: 'Sparkle URI Scheme'
+  name: 'CrowVPN URI Scheme'
   schemes:
     - 'clash'
     - 'mihomo'
     - 'sparkle'
+    - 'crowvpn'
 win:
   target:
     - nsis
@@ -38,6 +39,7 @@ nsis:
   createDesktopShortcut: true
 mac:
   target:
+    - dmg
     - pkg
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -56,13 +58,13 @@ pkg:
 linux:
   desktop:
     entry:
-      Name: Sparkle
-      MimeType: 'x-scheme-handler/clash;x-scheme-handler/mihomo;x-scheme-handler/sparkle'
+      Name: CrowVPN
+      MimeType: 'x-scheme-handler/clash;x-scheme-handler/mihomo;x-scheme-handler/sparkle;x-scheme-handler/crowvpn'
   target:
     - deb
     - rpm
     - pacman
-  maintainer: xishang0128
+  maintainer: crowmesh
   category: Utility
   artifactName: ${name}-linux-${version}-${arch}.${ext}
 deb:

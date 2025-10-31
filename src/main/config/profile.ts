@@ -149,7 +149,8 @@ export async function createProfile(item: Partial<ProfileItem>): Promise<Profile
           headers: {
             'User-Agent': await getUserAgent()
           },
-          responseType: 'text'
+          responseType: 'text',
+          validateStatus: () => true
         })
       } else {
         try {
@@ -211,7 +212,8 @@ export async function createProfile(item: Partial<ProfileItem>): Promise<Profile
                 proxy: { protocol: 'http', host: '127.0.0.1', port: mixedPort }
               }),
             headers: { 'User-Agent': newItem.ua || (await getUserAgent()) },
-            responseType: 'text'
+            responseType: 'text',
+            validateStatus: () => true
           })
         } catch (error) {
           if (axios.isAxiosError(error)) {

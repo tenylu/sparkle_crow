@@ -30,7 +30,8 @@ export const getAxios = async (force: boolean = false): Promise<AxiosInstance> =
   axiosIns = axios.create({
     baseURL: `http://localhost`,
     socketPath: currentSocketPath,
-    timeout: 15000
+    timeout: 15000,
+    validateStatus: () => true
   })
 
   axiosIns.interceptors.response.use(

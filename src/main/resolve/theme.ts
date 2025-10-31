@@ -44,7 +44,8 @@ export async function fetchThemes(): Promise<void> {
         host: '127.0.0.1',
         port: mixedPort
       }
-    })
+    }),
+    validateStatus: () => true
   })
   const zip = new AdmZip(zipData.data as Buffer)
   zip.extractAllTo(themesDir(), true)

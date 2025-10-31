@@ -8,3 +8,7 @@ out
 *.log*
 .idea
 *.ttf
+
+# Test update files
+latest.yml
+latest-beta.yml

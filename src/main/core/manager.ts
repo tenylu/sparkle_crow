@@ -17,7 +17,7 @@ import {
   patchAppConfig,
   patchControledMihomoConfig
 } from '../config'
-import { app, dialog, ipcMain, net } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
 import {
   startMihomoTraffic,
   startMihomoConnections,
@@ -35,11 +35,13 @@ import { promisify } from 'util'
 import { mainWindow } from '..'
 import path from 'path'
 import os from 'os'
+import net from 'net'
 import { createWriteStream, existsSync } from 'fs'
 import { uploadRuntimeConfig } from '../resolve/gistApi'
 import { startMonitor } from '../resolve/trafficMonitor'
 import { disableSysProxy, triggerSysProxy } from '../sys/sysproxy'
 import { getAxios } from './mihomoApi'
+import { findAvailablePort } from '../resolve/server'
 
 const ctlParam = process.platform === 'win32' ? '-ext-ctl-pipe' : '-ext-ctl-unix'
 
@@ -63,7 +65,7 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     disableNftables = false,
     safePaths = []
   } = await getAppConfig()
-  const { 'log-level': logLevel } = await getControledMihomoConfig()
+  const { 'log-level': logLevel, 'mixed-port': configuredPort } = await getControledMihomoConfig()
   const { current } = await getProfileConfig()
   const { tun } = await getControledMihomoConfig()
 
@@ -76,6 +78,34 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
       return startCore(detached)
     }
     throw error
+  }
+
+  // Check if the configured port is available, if not, find an available port
+  const actualPort = configuredPort || 7890
+  const isPortAvailable = await new Promise<boolean>((resolve) => {
+    const testServer = net.createServer()
+    testServer.once('error', () => resolve(false))
+    testServer.once('listening', () => {
+      testServer.close(() => resolve(true))
+    })
+    testServer.listen(actualPort, '127.0.0.1')
+  })
+
+  if (!isPortAvailable) {
+    // Port is in use, find an available port
+    try {
+      const availablePort = await findAvailablePort(actualPort)
+      console.log(`[Manager] Port ${actualPort} is in use, switching to port ${availablePort}`)
+      await patchControledMihomoConfig({ 'mixed-port': availablePort })
+      await writeFile(logPath(), `[Manager]: Port ${actualPort} is in use, switched to port ${availablePort}\n`, {
+        flag: 'a'
+      })
+    } catch (error) {
+      console.error('[Manager] Failed to find available port:', error)
+      await writeFile(logPath(), `[Manager]: Failed to find available port: ${error}\n`, {
+        flag: 'a'
+      })
+    }
   }
 
   await generateProfile()

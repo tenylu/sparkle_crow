@@ -84,7 +84,8 @@ async function setSysProxy(onlyActiveDevice: boolean): Promise<void> {
             only_active_device: onlyActiveDevice
           },
           {
-            socketPath: helperSocketPath
+            socketPath: helperSocketPath,
+            validateStatus: () => true
           }
         )
       } else {
@@ -108,7 +109,8 @@ async function setSysProxy(onlyActiveDevice: boolean): Promise<void> {
               only_active_device: onlyActiveDevice
             },
             {
-              socketPath: helperSocketPath
+              socketPath: helperSocketPath,
+              validateStatus: () => true
             }
           )
         } else {
@@ -134,7 +136,8 @@ export async function disableSysProxy(onlyActiveDevice: boolean): Promise<void> 
       'http://localhost/disable',
       { only_active_device: onlyActiveDevice },
       {
-        socketPath: helperSocketPath
+        socketPath: helperSocketPath,
+        validateStatus: () => true
       }
     )
   } else {
@@ -148,7 +151,8 @@ export async function isHelperInstalled(): Promise<boolean> {
   }
   try {
     await axios.get('http://localhost/ping', {
-      socketPath: helperSocketPath
+      socketPath: helperSocketPath,
+      validateStatus: () => true
     })
     return true
   } catch (error) {

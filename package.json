@@ -1,10 +1,10 @@
 {
-  "name": "sparkle",
-  "version": "1.6.13",
-  "description": "Sparkle",
+  "name": "crowvpn",
+  "version": "2.0.1",
+  "description": "CrowVPN",
   "main": "./out/main/index.js",
-  "author": "xishang0128",
-  "homepage": "https://github.com/xishang0128/sparkle",
+  "author": "crowmesh",
+  "homepage": "https://github.com/crowmesh/sparkle",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
@@ -19,9 +19,9 @@
     "dev": "electron-vite dev",
     "preinstall": "npx only-allow pnpm -y",
     "postinstall": "electron-builder install-app-deps",
-    "build:win": "electron-vite build && electron-builder --publish never --win",
-    "build:mac": "electron-vite build && electron-builder --publish never --mac",
-    "build:linux": "electron-vite build && electron-builder --publish never --linux"
+    "build:win": "electron-vite build && electron-builder --publish never --win && pnpm checksum .exe .7z",
+    "build:mac": "electron-vite build && electron-builder --publish never --mac && pnpm checksum .pkg .dmg",
+    "build:linux": "electron-vite build && electron-builder --publish never --linux && pnpm checksum .deb .rpm .pkg.tar.xz AppImage"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -39,9 +39,13 @@
     "file-icon": "^6.0.0",
     "file-icon-info": "^1.1.1",
     "iconv-lite": "^0.7.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
     "webdav": "^5.8.0",
     "ws": "^8.18.3",
-    "yaml": "^2.8.1"
+    "yaml": "^2.8.1",
+    "zustand": "^5.0.8",
+    "dompurify": "^3.1.6"
   },
   "devDependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -55,6 +59,7 @@
     "@types/adm-zip": "^0.5.7",
     "@types/express": "^5.0.3",
     "@types/js-yaml": "^4.0.9",
+    "@types/leaflet": "^1.9.8",
     "@types/node": "^24.8.1",
     "@types/pubsub-js": "^1.8.6",
     "@types/react": "^19.2.2",
@@ -96,7 +101,8 @@
     "types-pac": "^1.0.3",
     "typescript": "^5.9.3",
     "vite": "^7.1.10",
-    "vite-plugin-monaco-editor": "^1.1.0"
+    "vite-plugin-monaco-editor": "^1.1.0",
+    "@types/dompurify": "^3.0.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

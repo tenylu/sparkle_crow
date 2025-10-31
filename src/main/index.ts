@@ -11,11 +11,12 @@ import {
   powerMonitor,
   ipcMain
 } from 'electron'
+import os from 'os'
 import { addOverrideItem, addProfileItem, getAppConfig } from './config'
 import { quitWithoutCore, startCore, stopCore } from './core/manager'
-import { triggerSysProxy } from './sys/sysproxy'
+import { triggerSysProxy, disableSysProxy } from './sys/sysproxy'
 import icon from '../../resources/icon.png?asset'
-import { createTray } from './resolve/tray'
+import { createTray, updateTrayIconBrightness } from './resolve/tray'
 import { createApplicationMenu } from './resolve/menu'
 import { init } from './utils/init'
 import { join } from 'path'
@@ -31,11 +32,25 @@ import { showFloatingWindow } from './resolve/floatingWindow'
 import iconv from 'iconv-lite'
 import { getAppConfigSync } from './config/app'
 import { getUserAgent } from './utils/userAgent'
+import { XboardClient } from './api/xboard-client'
+import { getXboardConfig, setXboardConfig, isLoggedIn, clearXboardConfig } from './config/xboard'
+import { fetchSubscribe, parseClashYAML, type ParsedNode } from './api/subscribe-parser'
+import { stringifyYaml } from './utils/yaml'
+import YAML from 'yaml'
 
 let quitTimeout: NodeJS.Timeout | null = null
 export let mainWindow: BrowserWindow | null = null
 
 const syncConfig = getAppConfigSync()
+
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error)
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason)
+})
 
 if (
   process.platform === 'win32' &&
@@ -201,7 +216,7 @@ powerMonitor.on('shutdown', async () => {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('sparkle.app')
+  electronApp.setAppUserModelId('crowvpn.app')
   try {
     await initPromise
   } catch (e) {
@@ -230,6 +245,632 @@ app.whenReady().then(async () => {
   })
   const { showFloatingWindow: showFloating = false, disableTray = false } = await getAppConfig()
   registerIpcMainHandlers()
+  
+  // Register Xboard IPC handlers
+  ipcMain.handle('xboard:login', async (_event, baseURL: string, email: string, password: string) => {
+    try {
+      const client = new XboardClient(baseURL)
+      const authToken = await client.login({ email, password })
+      console.log('[Main] Login successful, saving token:', authToken.substring(0, 20) + '...')
+      setXboardConfig({ baseURL, token: authToken, email })
+      return { success: true, token: authToken }
+    } catch (error: any) {
+      console.error('[Main] Login failed:', error.message)
+      throw new Error(error.message || 'Login failed')
+    }
+  })
+
+  ipcMain.handle('xboard:sendRegisterCode', async (_event, baseURL: string, email: string) => {
+    try {
+      const client = new XboardClient(baseURL)
+      await client.sendEmailVerify(email)
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Send register code failed:', error.message)
+      throw new Error(error.message || 'Failed to send verification code')
+    }
+  })
+
+  ipcMain.handle('xboard:register', async (_event, baseURL: string, email: string, password: string, inviteCode: string, emailCode: string) => {
+    try {
+      const client = new XboardClient(baseURL)
+      await client.register({
+        email,
+        password,
+        password_confirm: password, // V2Board API expects password_confirm
+        email_code: emailCode,
+        invite_code: inviteCode
+      })
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Register failed:', error.message)
+      throw new Error(error.message || 'Registration failed')
+    }
+  })
+
+  ipcMain.handle('xboard:sendResetCode', async (_event, baseURL: string, email: string) => {
+    try {
+      const client = new XboardClient(baseURL)
+      await client.sendEmailVerify(email)
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Send reset code failed:', error.message)
+      throw new Error(error.message || 'Failed to send verification code')
+    }
+  })
+
+  ipcMain.handle('xboard:resetPassword', async (_event, baseURL: string, email: string, emailCode: string, password: string) => {
+    try {
+      const client = new XboardClient(baseURL)
+      await client.resetPassword({
+        email,
+        email_code: emailCode,
+        password,
+        password_confirm: password // V2Board API expects password_confirm
+      })
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Reset password failed:', error.message)
+      throw new Error(error.message || 'Password reset failed')
+    }
+  })
+  
+  ipcMain.handle('xboard:logout', async () => {
+    try {
+      const config = getXboardConfig()
+      if (config?.baseURL && config?.token) {
+        const client = new XboardClient(config.baseURL)
+        client.setAuthToken(config.token)
+        await client.logout()
+      }
+      clearXboardConfig()
+      return { success: true }
+    } catch (error: any) {
+      clearXboardConfig() // Clear anyway
+      return { success: true }
+    }
+  })
+  
+  ipcMain.handle('xboard:getUserInfo', async () => {
+    try {
+      const config = getXboardConfig()
+      console.log('[Main] getUserInfo - config:', config)
+      if (!config?.baseURL || !config?.token) {
+        throw new Error('Not logged in')
+      }
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      console.log('[Main] Created client, token set:', !!config.token)
+      return await client.getUserInfo()
+    } catch (error: any) {
+      console.error('[Main] getUserInfo error:', error.message)
+      throw error
+    }
+  })
+  
+  ipcMain.handle('xboard:getSubscribe', async () => {
+    try {
+      const config = getXboardConfig()
+      console.log('[Main] getSubscribe - config:', config)
+      if (!config?.baseURL || !config?.token) {
+        throw new Error('Not logged in')
+      }
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      console.log('[Main] Created client, token set:', !!config.token)
+      return await client.getSubscribe()
+    } catch (error: any) {
+      console.error('[Main] getSubscribe error:', error.message)
+      throw error
+    }
+  })
+  
+  ipcMain.handle('xboard:getAnnouncements', async () => {
+    try {
+      const config = getXboardConfig()
+      if (!config?.baseURL || !config?.token) {
+        return []
+      }
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      return await client.getAnnouncements()
+    } catch (error: any) {
+      console.error('[Main] getAnnouncements error:', error.message)
+      return []
+    }
+  })
+  
+  ipcMain.handle('xboard:checkLogin', () => {
+    try {
+      return { loggedIn: isLoggedIn(), config: getXboardConfig() }
+    } catch (error: any) {
+      console.error('[Main] checkLogin error:', error.message)
+      return { loggedIn: false, config: null }
+    }
+  })
+  
+  ipcMain.handle('check-node-latency', async (_event, node) => {
+    try {
+      const { checkNodeLatency } = await import('./api/subscribe-parser')
+      return await checkNodeLatency(node)
+    } catch (error: any) {
+      console.error('[Main] Check latency error:', error.message)
+      return { ...node, status: 'offline' }
+    }
+  })
+
+  ipcMain.handle('xboard:checkStatus', async () => {
+    try {
+      // Check if Mihomo core is running
+      const http = await import('http')
+      
+      return new Promise((resolve) => {
+        const req = http.get({
+          hostname: '127.0.0.1',
+          port: 9090,
+          path: '/connections',
+          timeout: 1000
+        }, (res) => {
+          res.on('data', () => {})
+          res.on('end', () => {
+            resolve({ connected: true, ip: '已连接', location: '代理中' })
+          })
+        })
+        
+        req.on('error', () => {
+          resolve({ connected: false, ip: '', location: '' })
+        })
+        
+        req.on('timeout', () => {
+          req.destroy()
+          resolve({ connected: false, ip: '', location: '' })
+        })
+      })
+    } catch (error) {
+      return { connected: false, ip: '', location: '' }
+    }
+  })
+
+  // Update window title with connection status
+  ipcMain.handle('ui:updateWindowTitle', async (_event, isConnected: boolean, title?: string) => {
+    try {
+      if (mainWindow) {
+        if (title) {
+          mainWindow.setTitle(title)
+        } else {
+          const status = isConnected ? '已连接' : '未连接'
+          mainWindow.setTitle(`CrowVPN - ${status}`)
+        }
+        return { success: true }
+      }
+      return { success: false }
+    } catch (error: any) {
+      console.error('[Main] ui:updateWindowTitle error:', error?.message || error)
+      return { success: false, message: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('xboard:getNodes', async () => {
+    try {
+      const config = getXboardConfig()
+      if (!config?.baseURL || !config?.token) {
+        throw new Error('Not logged in')
+      }
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      
+      console.log('[Main] Getting subscribe info...')
+      const subscribe = await client.getSubscribe()
+      console.log('[Main] Subscribe URL:', subscribe.subscribe_url)
+      
+      // Fetch and parse the actual subscribe
+      const yamlText = await fetchSubscribe(subscribe.subscribe_url)
+      const nodes = await parseClashYAML(yamlText)
+      
+      console.log('[Main] Returning', nodes.length, 'nodes immediately (status will be updated in UI)')
+      
+      return nodes
+    } catch (error: any) {
+      console.error('[Main] Get nodes error:', error.message)
+      throw error
+    }
+  })
+
+  // Open support chat window with relaxed CSP
+  ipcMain.handle('ui:openSupport', async () => {
+    try {
+      const win = new BrowserWindow({
+        width: 600,
+        height: 700,
+        resizable: true,
+        minimizable: false,
+        maximizable: false,
+        title: '在线客服',
+        modal: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        autoHideMenuBar: true,
+        webPreferences: {
+          preload: join(__dirname, '../preload/index.js'),
+          sandbox: false
+        }
+      })
+      // Position at bottom-right relative to main window if available
+      try {
+        const margin = 16
+        if (mainWindow) {
+          const b = mainWindow.getBounds()
+          const x = Math.max(0, b.x + b.width - 600 - margin)
+          const y = Math.max(0, b.y + b.height - 700 - margin)
+          win.setPosition(x, y)
+        } else {
+          win.center()
+        }
+      } catch {}
+      await win.loadURL('https://salesiq.zohopublic.com/signaturesupport.ls?widgetcode=siq661b3c690233e140e667eb2011f71bacbde8e0374600c18ca43af18d499fa838')
+      // Try to scroll to chat area after load
+      win.webContents.on('did-finish-load', () => {
+        setTimeout(() => {
+          try {
+            win.webContents.executeJavaScript("window.scrollTo(0, document.body.scrollHeight)").catch(() => {})
+          } catch {}
+        }, 500)
+      })
+      win.show()
+      return { success: true }
+    } catch (e: any) {
+      console.error('[Main] ui:openSupport error:', e?.message || e)
+      return { success: false, message: e?.message || String(e) }
+    }
+  })
+
+  ipcMain.handle('xboard:connect', async (_event, nodeName: string, mode: string = 'rule') => {
+    try {
+      console.log('[Main] Connecting to node:', nodeName, 'mode:', mode)
+      
+      const config = getXboardConfig()
+      if (!config?.baseURL || !config?.token) {
+        throw new Error('Not logged in')
+      }
+      
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      
+      // Get subscribe info
+      const subscribe = await client.getSubscribe()
+      const yamlText = await fetchSubscribe(subscribe.subscribe_url)
+      
+      // Parse YAML to find the selected node
+      const doc = YAML.parse(yamlText)
+      
+      if (!doc || !Array.isArray(doc.proxies)) {
+        throw new Error('No proxies found in subscribe')
+      }
+      
+      // Find the selected node
+      const selectedProxy = doc.proxies.find((p: any) => p.name === nodeName)
+      if (!selectedProxy) {
+        throw new Error(`Node ${nodeName} not found`)
+      }
+      
+      console.log('[Main] Found selected node:', selectedProxy.name)
+      
+      // Generate minimal Mihomo config based on mode
+      const minimalConfig: any = {
+        port: 7890,
+        'socks-port': 7891,
+        'mixed-port': 7890,
+        'allow-lan': true,
+        'log-level': 'info',
+        'external-controller': '127.0.0.1:9090',
+        'secret': '',
+        proxies: doc.proxies,
+        proxy: selectedProxy.name
+      }
+      
+      // Set rules based on mode
+      if (mode === 'global') {
+        minimalConfig.mode = 'global'
+        minimalConfig.rules = [] // No rules for global mode
+      } else {
+        minimalConfig.mode = 'rule'
+        minimalConfig.rules = [
+          'DOMAIN-SUFFIX,local,DIRECT',
+          'IP-CIDR,127.0.0.0/8,DIRECT',
+          'IP-CIDR,172.16.0.0/12,DIRECT',
+          'IP-CIDR,192.168.0.0/16,DIRECT',
+          'IP-CIDR,10.0.0.0/8,DIRECT',
+          'GEOIP,CN,DIRECT',
+          `MATCH,${selectedProxy.name}`
+        ]
+      }
+      
+      console.log('[Main] Creating config with mode:', mode)
+      
+      // Create a local profile for this connection
+      const profileId = 'xboard-vpn'
+      const { addProfileItem, getProfileConfig, setProfileStr } = await import('./config')
+      
+      // Check if profile already exists
+      const profileConfig = await getProfileConfig()
+      const existingProfile = profileConfig.items.find(p => p.id === profileId)
+      
+      if (!existingProfile) {
+        // Create new profile
+        await addProfileItem({
+          id: profileId,
+          name: 'Xboard VPN',
+          type: 'local',
+          url: ''
+        })
+      }
+      
+      // Set the profile content
+      const configStr = stringifyYaml(minimalConfig)
+      await setProfileStr(profileId, configStr)
+      
+      // Change to this profile
+      const { changeCurrentProfile } = await import('./config')
+      await changeCurrentProfile(profileId)
+      
+      // Start Mihomo core (already imported at top of file)
+      await startCore()
+      
+      // Wait a bit for core to fully start
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Enable system proxy (already imported at top of file)
+      await triggerSysProxy(true, false)
+      
+      console.log('[Main] VPN connected with mode:', mode)
+      
+      console.log('[Main] VPN connected successfully')
+      
+      // Update tray icon brightness
+      await updateTrayIconBrightness(true)
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Connect error:', error.message)
+      throw error
+    }
+  })
+
+  ipcMain.handle('xboard:disconnect', async () => {
+    try {
+      console.log('[Main] Disconnecting VPN...')
+      
+      // Stop Mihomo core (already imported at top of file)
+      await stopCore()
+      
+      // Disable system proxy (already imported at top of file)
+      await disableSysProxy(false)
+      
+      console.log('[Main] VPN disconnected successfully')
+      
+      // Update tray icon brightness
+      await updateTrayIconBrightness(false)
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Disconnect error:', error.message)
+      throw error
+    }
+  })
+
+  ipcMain.handle('xboard:switchMode', async (_event, mode: string) => {
+    try {
+      console.log('[Main] Switching to mode:', mode)
+      
+      // Use the same approach as Sparkle's native mode switching
+      const { patchControledMihomoConfig } = await import('./config/controledMihomo')
+      const { patchMihomoConfig } = await import('./core/mihomoApi')
+      
+      await patchControledMihomoConfig({ mode: mode })
+      await patchMihomoConfig({ mode: mode })
+      
+      console.log('[Main] Mode switched successfully')
+      
+      // Send notification
+      new Notification({
+        title: mode === 'global' ? '已切换至全局模式' : '已切换至规则模式'
+      }).show()
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Switch mode error:', error.message)
+      throw new Error(error.message || 'Failed to switch mode')
+    }
+  })
+
+  ipcMain.handle('xboard:switchNode', async (_event, nodeName: string) => {
+    try {
+      console.log('[Main] Switching to node:', nodeName)
+      
+      // First disconnect, then reconnect with new node
+      console.log('[Main] Disconnecting first...')
+      await stopCore()
+      await disableSysProxy(false)
+      
+      // Wait a bit for clean shutdown
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Get subscription and create new config with new node
+      const config = getXboardConfig()
+      if (!config?.baseURL || !config?.token) {
+        throw new Error('Not logged in')
+      }
+      
+      const client = new XboardClient(config.baseURL)
+      client.setAuthToken(config.token)
+      
+      const subscribe = await client.getSubscribe()
+      const yamlText = await fetchSubscribe(subscribe.subscribe_url)
+      const doc = YAML.parse(yamlText)
+      
+      if (!doc || !Array.isArray(doc.proxies)) {
+        throw new Error('No proxies found in subscribe')
+      }
+      
+      const selectedProxy = doc.proxies.find((p: any) => p.name === nodeName)
+      if (!selectedProxy) {
+        throw new Error(`Node ${nodeName} not found`)
+      }
+      
+      console.log('[Main] Found new node:', selectedProxy.name)
+      
+      // Generate config with new node
+      const minimalConfig: any = {
+        port: 7890,
+        'socks-port': 7891,
+        'mixed-port': 7890,
+        'allow-lan': true,
+        mode: 'rule',
+        'log-level': 'info',
+        'external-controller': '127.0.0.1:9090',
+        'secret': '',
+        proxies: doc.proxies,
+        proxy: selectedProxy.name,
+        rules: [
+          'DOMAIN-SUFFIX,local,DIRECT',
+          'IP-CIDR,127.0.0.0/8,DIRECT',
+          'IP-CIDR,172.16.0.0/12,DIRECT',
+          'IP-CIDR,192.168.0.0/16,DIRECT',
+          'IP-CIDR,10.0.0.0/8,DIRECT',
+          'GEOIP,CN,DIRECT',
+          `MATCH,${selectedProxy.name}`
+        ]
+      }
+      
+      // Update profile
+      const profileId = 'xboard-vpn'
+      const { setProfileStr } = await import('./config')
+      const configStr = stringifyYaml(minimalConfig)
+      await setProfileStr(profileId, configStr)
+      
+      // Change to this profile
+      const { changeCurrentProfile } = await import('./config')
+      await changeCurrentProfile(profileId)
+      
+      // Restart core with new config
+      console.log('[Main] Reconnecting with new node...')
+      await startCore()
+      await triggerSysProxy(true, false)
+      
+      console.log('[Main] Node switched successfully by reconnecting')
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Switch node error:', error.message || error.toString())
+      throw error
+    }
+  })
+
+  // TUN (virtual network card) toggle
+  ipcMain.handle('xboard:setTun', async (_event, enable: boolean) => {
+    try {
+      const { patchControledMihomoConfig } = await import('./config/controledMihomo')
+      // Enable DNS alongside TUN when enabling
+      if (enable) {
+        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } } as any)
+      } else {
+        await patchControledMihomoConfig({ tun: { enable: false } } as any)
+      }
+      // Restart core to apply
+      await stopCore()
+      await startCore()
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] setTun error:', error?.message || error)
+      return { success: false, message: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('xboard:getTun', async () => {
+    try {
+      const { getControledMihomoConfig } = await import('./config/controledMihomo')
+      const conf = await getControledMihomoConfig()
+      // @ts-ignore
+      const enable = Boolean(conf?.tun?.enable)
+      return { enable }
+    } catch (error: any) {
+      return { enable: false }
+    }
+  })
+
+  // Get local IP address (legacy)
+  ipcMain.handle('getLocalIP', () => {
+    try {
+      const { getBestLANIP } = require('./utils/net')
+      const ip = getBestLANIP()
+      console.log('[Main IPC] getLocalIP result:', ip)
+      return { ip }
+    } catch (error) {
+      console.error('[Main IPC] getLocalIP error:', error)
+      return { ip: '127.0.0.1' }
+    }
+  })
+
+  // Get best LAN IP
+  ipcMain.handle('net:getBestLanIP', () => {
+    try {
+      console.log('[Main IPC] net:getBestLanIP called')
+      const os = require('os')
+      const networkInterfaces = os.networkInterfaces()
+      console.log('[Main IPC] Network interfaces:', Object.keys(networkInterfaces || {}))
+      
+      // Simple approach: just find first non-127.0.0.1, non-internal IPv4
+      for (const [name, addrs] of Object.entries(networkInterfaces || {})) {
+        if (!addrs) continue
+        console.log(`[Main IPC] Checking interface ${name}`)
+        
+        for (const addr of addrs) {
+          console.log(`[Main IPC]   Address: ${addr.address}, family: ${addr.family}, internal: ${addr.internal}`)
+          if (addr.family === 'IPv4' && !addr.internal && addr.address !== '127.0.0.1' && !addr.address.startsWith('169.254.')) {
+            console.log(`[Main IPC] Found LAN IP: ${addr.address}`)
+            return { ip: addr.address }
+          }
+        }
+      }
+      
+      console.log('[Main IPC] No LAN IP found, returning 127.0.0.1')
+      return { ip: '127.0.0.1' }
+    } catch (error) {
+      console.error('[Main IPC] net:getBestLanIP error:', error)
+      return { ip: '127.0.0.1' }
+    }
+  })
+
+  // List all LAN IPs
+  ipcMain.handle('net:listLanIPs', () => {
+    try {
+      console.log('[Main IPC] net:listLanIPs called')
+      const os = require('os')
+      const networkInterfaces = os.networkInterfaces()
+      const result = []
+      
+      for (const [name, addrs] of Object.entries(networkInterfaces || {})) {
+        if (!addrs) continue
+        
+        for (const addr of addrs) {
+          if (addr.family === 'IPv4' && !addr.internal && addr.address !== '127.0.0.1' && !addr.address.startsWith('169.254.')) {
+            result.push({
+              ip: addr.address,
+              interface: name,
+              family: 'IPv4',
+              isPrivate: addr.address.startsWith('192.168.') || addr.address.startsWith('10.') || addr.address.match(/^172\.(1[6-9]|2\d|3[01])\./)
+            })
+          }
+        }
+      }
+      
+      console.log(`[Main IPC] Found ${result.length} LAN IPs`)
+      return { ips: result }
+    } catch (error) {
+      console.error('[Main IPC] net:listLanIPs error:', error)
+      return { ips: [] }
+    }
+  })
+  
   await createWindow()
   if (showFloating) {
     showFloatingWindow()
@@ -238,6 +879,7 @@ app.whenReady().then(async () => {
     await createTray()
   }
   await initShortcut()
+  
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -246,7 +888,7 @@ app.whenReady().then(async () => {
 })
 
 async function handleDeepLink(url: string): Promise<void> {
-  if (!url.startsWith('clash://') && !url.startsWith('mihomo://') && !url.startsWith('sparkle://'))
+  if (!url.startsWith('clash://') && !url.startsWith('mihomo://') && !url.startsWith('sparkle://') && !url.startsWith('crowvpn://'))
     return
 
   const urlObj = new URL(url)
@@ -318,7 +960,8 @@ async function showProfileInstallConfirm(url: string, name?: string | null): Pro
         headers: {
           'User-Agent': await getUserAgent()
         },
-        timeout: 5000
+        timeout: 5000,
+        validateStatus: () => true
       })
 
       if (response.headers['content-disposition']) {
@@ -387,8 +1030,8 @@ function showOverrideInstallConfirm(url: string, name?: string | null): Promise<
 export async function createWindow(): Promise<void> {
   const { useWindowFrame = false } = await getAppConfig()
   const mainWindowState = windowStateKeeper({
-    defaultWidth: 800,
-    defaultHeight: 700,
+    defaultWidth: 750,
+    defaultHeight: 1200,
     file: 'window-state.json'
   })
   // https://github.com/electron/electron/issues/16521#issuecomment-582955104
@@ -398,21 +1041,16 @@ export async function createWindow(): Promise<void> {
     Menu.setApplicationMenu(null)
   }
   mainWindow = new BrowserWindow({
-    minWidth: 800,
-    minHeight: 600,
-    width: mainWindowState.width,
-    height: mainWindowState.height,
-    x: mainWindowState.x,
-    y: mainWindowState.y,
+    width: 600,
+    height: 900,
     show: false,
-    frame: useWindowFrame,
+    frame: false,
+    resizable: false,
+    minimizable: true,
+    maximizable: false,
     fullscreenable: false,
-    titleBarStyle: useWindowFrame ? 'default' : 'hidden',
-    titleBarOverlay: useWindowFrame
-      ? false
-      : {
-          height: 49
-        },
+    titleBarStyle: 'hiddenInset',
+    title: 'CrowVPN',
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon: icon } : {}),
     webPreferences: {
@@ -422,6 +1060,10 @@ export async function createWindow(): Promise<void> {
     }
   })
   mainWindowState.manage(mainWindow)
+  
+  // Set initial title
+  mainWindow.setTitle('CrowVPN - 未连接')
+  
   mainWindow.on('ready-to-show', async () => {
     const {
       silentStart = false,
@@ -460,14 +1102,6 @@ export async function createWindow(): Promise<void> {
         await quitWithoutCore()
       }, autoQuitWithoutCoreDelay * 1000)
     }
-  })
-
-  mainWindow.on('resized', () => {
-    if (mainWindow) mainWindowState.saveState(mainWindow)
-  })
-
-  mainWindow.on('unmaximize', () => {
-    if (mainWindow) mainWindowState.saveState(mainWindow)
   })
 
   mainWindow.on('move', () => {

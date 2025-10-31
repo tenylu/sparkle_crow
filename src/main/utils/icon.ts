@@ -271,7 +271,8 @@ export async function getImageDataURL(url: string): Promise<string> {
         host: '127.0.0.1',
         port
       }
-    })
+    }),
+    validateStatus: () => true
   })
   const mimeType = res.headers['content-type']
   const dataURL = `data:${mimeType};base64,${Buffer.from(res.data).toString('base64')}`

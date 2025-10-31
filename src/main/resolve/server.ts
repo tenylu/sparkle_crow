@@ -111,7 +111,7 @@ export async function startSubStoreBackendServer(): Promise<void> {
       SUB_STORE_BACKEND_API_HOST: subStoreHost,
       SUB_STORE_DATA_BASE_PATH: subStoreDir(),
       SUB_STORE_BACKEND_CUSTOM_ICON: icon.toDataURL(),
-      SUB_STORE_BACKEND_CUSTOM_NAME: 'Sparkle',
+      SUB_STORE_BACKEND_CUSTOM_NAME: 'CrowVPN',
       SUB_STORE_BACKEND_SYNC_CRON: subStoreBackendSyncCron,
       SUB_STORE_BACKEND_DOWNLOAD_CRON: subStoreBackendDownloadCron,
       SUB_STORE_BACKEND_UPLOAD_CRON: subStoreBackendUploadCron,
@@ -158,7 +158,8 @@ export async function downloadSubStore(): Promise<void> {
             host: '127.0.0.1',
             port: mixedPort
           }
-        })
+        }),
+        validateStatus: () => true
       }
     )
     await writeFile(backendPath, Buffer.from(backendRes.data))
@@ -175,7 +176,8 @@ export async function downloadSubStore(): Promise<void> {
             host: '127.0.0.1',
             port: mixedPort
           }
-        })
+        }),
+        validateStatus: () => true
       }
     )
 
