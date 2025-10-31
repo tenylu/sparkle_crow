@@ -103,7 +103,7 @@ jobs:
       - name: Keep product name lowercase on Linux
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sed -i "s/productName: Sparkle/productName: sparkle/" electron-builder.yml
+          sed -i "s/productName: CrowVPN/productName: crowvpn/" electron-builder.yml
 
       - name: Install Build Tools
         if: matrix.os == 'ubuntu-latest' && matrix.format == 'pacman'
@@ -168,9 +168,9 @@ jobs:
           set -e
           VERSION=$(jq -r '.version' package.json)
           mkdir workdir
-          dpkg-deb -R dist/sparkle-linux-${VERSION}-loong64.deb workdir
+          dpkg-deb -R dist/crowvpn-linux-${VERSION}-loong64.deb workdir
           sed -i 's/^Architecture: .*/Architecture: loongarch64/' workdir/DEBIAN/control
-          dpkg-deb -b workdir dist/sparkle-linux-${VERSION}-loongarch64.deb
+          dpkg-deb -b workdir dist/crowvpn-linux-${VERSION}-loongarch64.deb
           rm -rf workdir
 
       - name: Create Changelog
@@ -188,9 +188,7 @@ jobs:
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}${{ matrix.format && '-' || '' }}${{ matrix.format || '' }}
           path: |
-            dist/sparkle*
-            !dist/sparkle.app.plist
-            !dist/sparkle*blockmap*
+            dist/crowvpn*
             latest.yml
             changelog.md
 
