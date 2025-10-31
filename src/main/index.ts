@@ -1044,15 +1044,16 @@ export async function createWindow(): Promise<void> {
     width: 600,
     height: 900,
     show: false,
-    frame: false,
+    frame: process.platform === 'win32', // Use system frame on Windows
     resizable: false,
     minimizable: true,
     maximizable: false,
     fullscreenable: false,
-    titleBarStyle: 'hiddenInset',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
     title: 'CrowVPN',
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon: icon } : {}),
+    ...(process.platform === 'win32' ? { icon: icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       spellcheck: false,

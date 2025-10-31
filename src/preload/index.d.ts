@@ -8,6 +8,8 @@ declare global {
     api: {
       webUtils: typeof webUtils
       getLocalIP: () => Promise<{ ip: string }>
+      getPlatform: () => Promise<NodeJS.Platform>
+      getVersion: () => Promise<string>
       net: {
         getBestLanIP: () => Promise<{ ip: string }>
         listLanIPs: () => Promise<{ ips: Array<{ ip: string, interface: string, family: 'IPv4' | 'IPv6', isPrivate?: boolean, isULA?: boolean }> }>

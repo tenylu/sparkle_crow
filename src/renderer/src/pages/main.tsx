@@ -35,6 +35,12 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
   } = useAppStore()
   const t = useTranslation()
   const [updateProgress, setUpdateProgress] = useState<{ downloading: boolean; progress: number } | null>(null)
+  const [platform, setPlatform] = useState<NodeJS.Platform>('darwin')
+
+  // Get platform info
+  useEffect(() => {
+    window.api.getPlatform().then((p) => setPlatform(p)).catch(() => {})
+  }, [])
 
   // Update window title when connection status or language changes
   useEffect(() => {
@@ -215,14 +221,16 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
 
       {/* Main content */}
       <div className="relative w-full h-full flex flex-col">
-        {/* Window Title Bar with title - draggable */}
-        <div className="h-8 flex items-center justify-center px-6 relative" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            {isConnected ? t('windowTitleConnected') : t('windowTitleDisconnected')}
-          </span>
-                </div>
+        {/* Window Title Bar with title - draggable (only on macOS) */}
+        {platform !== 'win32' && (
+          <div className="h-8 flex items-center justify-center px-6 relative" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+              {isConnected ? t('windowTitleConnected') : t('windowTitleDisconnected')}
+            </span>
+          </div>
+        )}
                 
-        <div className="flex items-center justify-between px-6 py-4 relative z-[10000]" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+        <div className={`flex items-center justify-between px-6 py-4 relative z-[10000]`} style={{ WebkitAppRegion: platform !== 'win32' ? 'drag' : undefined } as React.CSSProperties}>
           <div className="relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <UserMenu onLogout={onLogout} />
           </div>

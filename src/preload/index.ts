@@ -5,6 +5,8 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   webUtils: webUtils,
   getLocalIP: () => ipcRenderer.invoke('getLocalIP'),
+  getPlatform: () => ipcRenderer.invoke('platform'),
+  getVersion: () => ipcRenderer.invoke('getVersion'),
   net: {
     getBestLanIP: () => ipcRenderer.invoke('net:getBestLanIP'),
     listLanIPs: () => ipcRenderer.invoke('net:listLanIPs')
