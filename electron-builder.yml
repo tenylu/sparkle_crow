@@ -50,6 +50,16 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
   artifactName: ${name}-macos-${version}-${arch}.${ext}
+dmg:
+  contents:
+    - x: 410
+      y: 250
+      type: link
+      path: /Applications
+    - x: 230
+      y: 250
+      type: file
+      path: ${name}-${version}-${arch}.app
 pkg:
   allowAnywhere: false
   allowCurrentUserHome: false
@@ -76,4 +86,5 @@ pacman:
   afterInstall: 'build/linux/postinst'
   artifactName: ${name}-linux-${version}-${arch}.pkg.tar.xz
 npmRebuild: true
+afterPack: scripts/afterPack.mjs
 publish: []
