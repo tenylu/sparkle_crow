@@ -32,6 +32,7 @@ win:
   artifactName: ${name}-windows-${version}-${arch}-portable.${ext}
 nsis:
   artifactName: ${name}-windows-${version}-${arch}-setup.${ext}
+  installerIcon: build/installerIcon.ico
   uninstallDisplayName: ${productName}
   allowToChangeInstallationDirectory: true
   oneClick: false
