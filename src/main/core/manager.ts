@@ -110,7 +110,12 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
 
   await generateProfile()
   await checkProfile()
-  await stopCore()
+  
+  // Only stop core if it's already running
+  const running = await isCoreRunning()
+  if (running) {
+    await stopCore()
+  }
   if (tun?.enable && autoSetDNS) {
     try {
       await setPublicDNS()
@@ -386,6 +391,63 @@ async function stopChildProcess(process: ChildProcess): Promise<void> {
       return
     }
   })
+}
+
+/**
+ * Check if Mihomo core is currently running
+ */
+export async function isCoreRunning(): Promise<boolean> {
+  try {
+    if (child && !child.killed) {
+      return true
+    }
+    // Try to connect to the API socket to verify if core is running
+    const axiosIns = await getAxios(true) // Force refresh
+    const response = await axiosIns.get('/version')
+    return response?.version !== undefined
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * Smart start or hot reload: check if core is running, if yes hot reload config, otherwise start core
+ */
+export async function startOrHotReloadCore(): Promise<void> {
+  try {
+    const isRunning = await isCoreRunning()
+    
+    if (isRunning) {
+      console.log('[Manager] Core is running, attempting hot reload')
+      try {
+        // Generate new config
+        await generateProfile()
+        
+        // Get the updated runtime config
+        const runtimeConfig = await getRuntimeConfig()
+        
+        // PATCH the config via API for hot reload
+        const patchData: Partial<ControllerConfigs> = {
+          tun: runtimeConfig.tun as any,
+          mode: runtimeConfig.mode,
+          'allow-lan': runtimeConfig['allow-lan'],
+          'mixed-port': runtimeConfig['mixed-port']
+        }
+        await patchMihomoConfig(patchData)
+        console.log('[Manager] Hot reload completed successfully')
+      } catch (hotReloadError) {
+        console.error('[Manager] Hot reload failed, falling back to restart:', hotReloadError)
+        // Fall back to restart if hot reload fails
+        await restartCore()
+      }
+    } else {
+      console.log('[Manager] Core is not running, starting fresh')
+      await startCore()
+    }
+  } catch (e) {
+    console.error('[Manager] startOrHotReloadCore error:', e)
+    throw e
+  }
 }
 
 export async function restartCore(): Promise<void> {

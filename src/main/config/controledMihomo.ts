@@ -19,6 +19,9 @@ export async function getControledMihomoConfig(force = false): Promise<Partial<M
 }
 
 export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>, autoGenerateProfile = true): Promise<void> {
+  // Ensure we have a valid controledMihomoConfig before processing
+  await getControledMihomoConfig()
+  
   const { controlDns = true, controlSniff = true } = await getAppConfig()
   console.log('[patchControledMihomoConfig] Before processing, controledMihomoConfig.tun:', JSON.stringify(controledMihomoConfig.tun))
   console.log('[patchControledMihomoConfig] Patch:', JSON.stringify(patch))
@@ -47,6 +50,14 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>, a
     controledMihomoConfig.hosts = patch.hosts
   }
   controledMihomoConfig = deepMerge(controledMihomoConfig, patch)
+  
+  // Ensure macOS TUN stack is set to 'system' for proper functionality
+  if (process.platform === 'darwin' && controledMihomoConfig.tun?.enable) {
+    controledMihomoConfig.tun.stack = 'system'
+    controledMihomoConfig.tun['auto-route'] = true
+    controledMihomoConfig.tun['auto-detect-interface'] = true
+  }
+  
   console.log('[patchControledMihomoConfig] After merge, controledMihomoConfig.tun:', JSON.stringify(controledMihomoConfig.tun))
   await writeFile(controledMihomoConfigPath(), stringifyYaml(controledMihomoConfig), 'utf-8')
   console.log('[patchControledMihomoConfig] Wrote to file')
@@ -55,6 +66,8 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>, a
     console.log('[patchControledMihomoConfig] Calling generateProfile')
     await generateProfile()
     console.log('[patchControledMihomoConfig] generateProfile completed')
+    // Clear cache after generateProfile to ensure fresh reads
+    controledMihomoConfig = null as any
   } else {
     console.log('[patchControledMihomoConfig] Skipping generateProfile (will be called later)')
     // Clear cache so next getControledMihomoConfig() reads from disk

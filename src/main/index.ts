@@ -13,7 +13,7 @@ import {
 } from 'electron'
 import os from 'os'
 import { addOverrideItem, addProfileItem, getAppConfig } from './config'
-import { quitWithoutCore, startCore, stopCore } from './core/manager'
+import { quitWithoutCore, startCore, stopCore, restartCore } from './core/manager'
 import { triggerSysProxy, disableSysProxy } from './sys/sysproxy'
 import icon from '../../resources/icon.png?asset'
 import { createTray, updateTrayIconBrightness } from './resolve/tray'
@@ -781,10 +781,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('xboard:setTun', async (_event, enable: boolean) => {
     try {
       const { patchControledMihomoConfig } = await import('./config/controledMihomo')
-      const { restartCore } = await import('./core/manager')
       console.log(`[Main] Setting TUN to ${enable}`)
       
-      // Update controledMihomoConfig and restart core (like original Sparkle)
+      // Update controledMihomoConfig and restart core (TUN/DNS changes require restart)
       if (enable) {
         await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } })
         console.log('[Main] TUN enabled')
@@ -795,13 +794,9 @@ app.whenReady().then(async () => {
         await triggerSysProxy(true, false)
       }
       
+      // Restart core to apply TUN/DNS changes
       await restartCore()
       console.log('[Main] TUN configuration applied successfully')
-      
-      // Update tray icon
-      const { getControledMihomoConfig } = await import('./config/controledMihomo')
-      const controledMihomoConfig = await getControledMihomoConfig()
-      const tunEnabled = Boolean(controledMihomoConfig?.tun?.enable)
       
       // Notify renderer process
       mainWindow?.webContents.send('controledMihomoConfigUpdated')
