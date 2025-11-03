@@ -176,7 +176,12 @@ async function main() {
       }
     }
   } else {
-    filesToUpload.push(input)
+    // 如果是文件，添加所有参数作为文件
+    for (const arg of args) {
+      if (statSync(arg).isFile()) {
+        filesToUpload.push(arg)
+      }
+    }
   }
   
   if (filesToUpload.length === 0) {
@@ -186,6 +191,8 @@ async function main() {
   
   console.log(`🚀 准备上传 ${filesToUpload.length} 个文件到 R2`)
   console.log(`📦 Bucket: ${R2_CONFIG.bucket}`)
+  console.log(`🔗 Endpoint: ${R2_CONFIG.endpoint}`)
+  console.log(`🆔 Account ID: ${R2_CONFIG.accountId}`)
   console.log('')
   
   for (const filePath of filesToUpload) {
