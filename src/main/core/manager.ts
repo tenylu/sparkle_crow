@@ -17,7 +17,7 @@ import {
   patchAppConfig,
   patchControledMihomoConfig
 } from '../config'
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, net as electronNet } from 'electron'
 import {
   startMihomoTraffic,
   startMihomoConnections,
@@ -52,6 +52,7 @@ let networkDownHandled = false
 
 let child: ChildProcess
 let retry = 10
+let permissionGrantAttempted = false
 
 export async function startCore(detached = false): Promise<Promise<void>[]> {
   const {
@@ -115,6 +116,21 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   const running = await isCoreRunning()
   if (running) {
     await stopCore()
+    // Wait a bit for the socket to be released
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    
+      // Force remove socket if it still exists
+      const socketPath = mihomoIpcPath()
+      if (existsSync(socketPath)) {
+        console.log('[Manager] Force removing lingering socket file')
+        try {
+          await rm(socketPath)
+        } catch (err) {
+          console.log('[Manager] Failed to remove socket, may cause startup issue')
+        }
+        // Wait again for filesystem to update
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
   }
   if (tun?.enable && autoSetDNS) {
     try {
@@ -188,10 +204,73 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
           'Start TUN listening error: configure tun interface: Connect: operation not permitted'
         )
       ) {
-        patchControledMihomoConfig({ tun: { enable: false } })
-        mainWindow?.webContents.send('controledMihomoConfigUpdated')
-        ipcMain.emit('updateTrayMenu')
-        reject('虚拟网卡启动失败，前往内核设置页尝试手动授予内核权限')
+        console.log('[Manager] TUN permission denied, attempting to grant permissions')
+        
+        // Only attempt once per session to avoid repeated password prompts
+        if (permissionGrantAttempted) {
+          console.log('[Manager] Permission grant already attempted this session, skipping')
+          patchControledMihomoConfig({ tun: { enable: false } })
+          mainWindow?.webContents.send('controledMihomoConfigUpdated')
+          ipcMain.emit('updateTrayMenu')
+          
+          const { dialog } = require('electron')
+          const corePath = mihomoCorePath(await getAppConfig().then(cfg => cfg.core))
+          dialog.showErrorBox(
+            '权限授予失败',
+            `虚拟网卡需要管理员权限，但多次尝试授权失败。
+
+请手动在终端中运行：
+
+sudo chmod +sx "${corePath}"
+
+如果仍然失败，可能是 macOS 系统安全设置导致的限制。`
+          )
+          reject('虚拟网卡启动失败，权限授予失败')
+          return
+        }
+        
+        // Try to grant SUID permission via osascript password dialog
+        permissionGrantAttempted = true
+        try {
+          await manualGrantCorePermition()
+          console.log('[Manager] Permission granted, restarting core')
+          
+          // Restart core with new permissions
+          setTimeout(async () => {
+            try {
+              await restartCore()
+              console.log('[Manager] Core restarted with TUN permissions')
+            } catch (restartError) {
+              console.error('[Manager] Failed to restart core:', restartError)
+              patchControledMihomoConfig({ tun: { enable: false } })
+              mainWindow?.webContents.send('controledMihomoConfigUpdated')
+              ipcMain.emit('updateTrayMenu')
+            }
+          }, 500)
+          
+          // Don't reject, let it restart
+          return
+        } catch (permError) {
+          console.error('[Manager] Failed to grant permission:', permError)
+          patchControledMihomoConfig({ tun: { enable: false } })
+          mainWindow?.webContents.send('controledMihomoConfigUpdated')
+          ipcMain.emit('updateTrayMenu')
+          
+          // Show helpful error message with instructions
+          const corePath = mihomoCorePath(await getAppConfig().then(cfg => cfg.core))
+          const { dialog } = require('electron')
+          dialog.showErrorBox(
+            '权限授予失败',
+            `虚拟网卡需要管理员权限，但自动授权失败。
+
+macOS 可能阻止了 SUID 权限设置。请尝试在终端中手动运行：
+
+sudo chmod +sx "${corePath}"
+
+如果仍然失败，可能是 macOS 系统安全设置导致的限制。`
+          )
+          reject('虚拟网卡启动失败，权限授予失败')
+        }
       }
 
       if (
@@ -299,6 +378,82 @@ export async function stopCore(force = false): Promise<void> {
   }
 
   await getAxios(true).catch(() => {})
+
+  // Remove the Unix socket file if it exists (with retry for root-owned sockets)
+  const socketPath = mihomoIpcPath()
+  if (existsSync(socketPath)) {
+    console.log(`[Manager] Removing socket file: ${socketPath}`)
+    
+    // First, try to kill any process using the socket
+    try {
+      const execPromise = promisify(exec)
+      const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+      const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+      if (pids.length > 0) {
+        console.log(`[Manager] Found ${pids.length} process(es) using socket: ${pids.join(', ')}`)
+        // Try to kill processes normally first
+        for (const pidStr of pids) {
+          const pid = parseInt(pidStr)
+          if (!isNaN(pid)) {
+            try {
+              process.kill(pid, 'SIGTERM')
+              console.log(`[Manager] Sent SIGTERM to PID ${pid}`)
+            } catch {
+              // Process might not exist or we don't have permission
+            }
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        
+        // If still running, force kill
+        let someStillRunning = false
+        for (const pidStr of pids) {
+          const pid = parseInt(pidStr)
+          if (!isNaN(pid)) {
+            try {
+              process.kill(pid, 0) // Check if still running
+              someStillRunning = true
+              process.kill(pid, 'SIGKILL')
+              console.log(`[Manager] Sent SIGKILL to PID ${pid}`)
+            } catch {
+              // Process already dead or we don't have permission, ignore
+            }
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        
+        // If some processes are still running after SIGKILL, log but don't use sudo
+        // Using sudo here would prompt for password too frequently
+        if (someStillRunning && process.platform === 'darwin') {
+          console.log('[Manager] Some processes still running after SIGKILL, will try to remove socket')
+        }
+      }
+    } catch (lsofError) {
+      // lsof might not be available or socket might already be gone
+      console.log('[Manager] lsof check failed:', lsofError)
+    }
+    
+    // Now try to remove the socket file
+    let removed = false
+    for (let i = 0; i < 3; i++) {
+      try {
+        await rm(socketPath)
+        console.log(`[Manager] Socket file removed on attempt ${i + 1}`)
+        removed = true
+        break
+      } catch (err) {
+        console.log(`[Manager] Failed to remove socket file on attempt ${i + 1}: ${err}`)
+        if (i < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
+      }
+    }
+    // If still failed after retries, just log it
+    // Don't try sudo here as it would prompt for password too frequently
+    if (!removed) {
+      console.log('[Manager] Could not remove socket file, new process may fail to start')
+    }
+  }
 
   if (existsSync(path.join(dataDir(), 'core.pid'))) {
     const pidString = await readFile(path.join(dataDir(), 'core.pid'), 'utf-8')
@@ -435,6 +590,16 @@ export async function startOrHotReloadCore(): Promise<void> {
         }
         await patchMihomoConfig(patchData)
         console.log('[Manager] Hot reload completed successfully')
+        
+        // If TUN is enabled on macOS, set DNS after hot reload
+        if (runtimeConfig.tun?.enable && process.platform === 'darwin') {
+          try {
+            await setPublicDNS()
+            console.log('[Manager] DNS set after hot reload')
+          } catch (dnsError) {
+            console.error('[Manager] Failed to set DNS after hot reload:', dnsError)
+          }
+        }
       } catch (hotReloadError) {
         console.error('[Manager] Hot reload failed, falling back to restart:', hotReloadError)
         // Fall back to restart if hot reload fails
@@ -515,10 +680,20 @@ export async function manualGrantCorePermition(): Promise<void> {
   const corePath = mihomoCorePath(core)
   const execPromise = promisify(exec)
   const execFilePromise = promisify(execFile)
+  
   if (process.platform === 'darwin') {
-    const shell = `chown root:admin ${corePath.replace(' ', '\\\\ ')}\nchmod +sx ${corePath.replace(' ', '\\\\ ')}`
-    const command = `do shell script "${shell}" with administrator privileges`
-    await execPromise(`osascript -e '${command}'`)
+    // Escape path for shell and then for AppleScript
+    // First escape for shell: handle quotes and spaces
+    const shellEscaped = corePath.replace(/"/g, '\\"').replace(/\$/g, '\\$')
+    // Construct shell command
+    const shellCmd = `chown root:admin "${shellEscaped}" && chmod +sx "${shellEscaped}"`
+    // Then escape for AppleScript string
+    const applescriptEscaped = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    // Build final osascript command
+    const osascriptCmd = `osascript -e 'do shell script "${applescriptEscaped}" with administrator privileges'`
+    
+    console.log('[Manager] Granting permission via osascript:', osascriptCmd.substring(0, 200))
+    await execPromise(osascriptCmd)
   }
   if (process.platform === 'linux') {
     await execFilePromise('pkexec', [
@@ -535,10 +710,15 @@ export async function checkCorePermission(): Promise<boolean> {
   const execPromise = promisify(exec)
 
   try {
+    console.log('[Manager] Checking permission for:', corePath)
     const { stdout } = await execPromise(`ls -l "${corePath}"`)
     const permissions = stdout.trim().split(/\s+/)[0]
-    return permissions.includes('s') || permissions.includes('S')
+    console.log('[Manager] Current permissions:', permissions)
+    const hasSUID = permissions.includes('s') || permissions.includes('S')
+    console.log('[Manager] Has SUID:', hasSUID)
+    return hasSUID
   } catch (error) {
+    console.error('[Manager] Failed to check permission:', error)
     return false
   }
 }
@@ -603,9 +783,9 @@ async function setDNS(dns: string): Promise<void> {
   await execPromise(`networksetup -setdnsservers "${service}" ${dns}`)
 }
 
-async function setPublicDNS(): Promise<void> {
+export async function setPublicDNS(): Promise<void> {
   if (process.platform !== 'darwin') return
-  if (net.isOnline()) {
+  if (electronNet.isOnline()) {
     const { originDNS } = await getAppConfig()
     if (!originDNS) {
       await getOriginDNS()
@@ -619,7 +799,7 @@ async function setPublicDNS(): Promise<void> {
 
 async function recoverDNS(): Promise<void> {
   if (process.platform !== 'darwin') return
-  if (net.isOnline()) {
+  if (electronNet.isOnline()) {
     const { originDNS } = await getAppConfig()
     if (originDNS) {
       await setDNS(originDNS)
@@ -648,7 +828,7 @@ export async function startNetworkDetection(): Promise<void> {
   )
 
   networkDetectionTimer = setInterval(async () => {
-    if (isAnyNetworkInterfaceUp(extendedBypass) && net.isOnline()) {
+    if (isAnyNetworkInterfaceUp(extendedBypass) && electronNet.isOnline()) {
       if ((networkDownHandled && !child) || (child && child.killed)) {
         startCore()
         if (sysProxy.enable) triggerSysProxy(true, onlyActiveDevice)

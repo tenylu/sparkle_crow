@@ -131,13 +131,6 @@ export async function buildXboardConfig(): Promise<any> {
     dns: controledMihomoConfig.dns || { enable: true },
   }
   
-  // Ensure TUN config has correct structure on macOS
-  if (config.tun && config.tun.enable && process.platform === 'darwin') {
-    config.tun.stack = config.tun.stack || 'system'
-    config.tun['auto-route'] = config.tun['auto-route'] !== false ? true : false
-    config.tun['auto-detect-interface'] = config.tun['auto-detect-interface'] !== false ? true : false
-  }
-  
   // If no proxy state, return minimal config
   if (!proxyState?.proxies || !proxyState.selectedNodeName) {
     console.log('[buildXboardConfig] No proxy state, returning minimal config')

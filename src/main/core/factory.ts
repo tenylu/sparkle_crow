@@ -36,7 +36,8 @@ export async function generateProfile(): Promise<void> {
   currentProfileStr = stringifyYaml(currentProfileConfig)
   const currentProfile = await overrideProfile(current, currentProfileConfig)
   overrideProfileStr = stringifyYaml(currentProfile)
-  const controledMihomoConfig = await getControledMihomoConfig()
+  // Force refresh controledMihomoConfig from disk to get latest TUN/DNS settings
+  const controledMihomoConfig = await getControledMihomoConfig(true)
   const profile = deepMerge(
     JSON.parse(JSON.stringify(currentProfile)),
     JSON.parse(JSON.stringify(controledMihomoConfig))

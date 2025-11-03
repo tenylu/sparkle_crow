@@ -50,8 +50,13 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
 
   // Listen for update progress
   useEffect(() => {
-    const handleUpdateStatus = (_event: unknown, status: { downloading: boolean; progress: number }) => {
+    const handleUpdateStatus = (_event: unknown, status: { downloading: boolean; progress: number; error?: string }) => {
       setUpdateProgress(status)
+      // If there's an error and it's not downloading, close the modal
+      if (status.error && !status.downloading) {
+        setShowUpdateModal(false)
+        setUpdateProgress(null)
+      }
     }
     
     if (window.electron?.ipcRenderer) {
@@ -61,7 +66,7 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
       }
     }
     return undefined
-  }, [])
+  }, [setShowUpdateModal])
 
   useEffect(() => {
     const loadUserInfo = async () => {
@@ -325,15 +330,23 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
                   {/* Buttons */}
                   <div className="flex space-x-3">
                     <button
-                      onClick={() => {
-                        if (!updateProgress?.downloading) {
+                      onClick={async () => {
+                        if (updateProgress?.downloading) {
+                          // Cancel download
+                          try {
+                            await window.api.update.cancelUpdate()
+                            setUpdateProgress(null)
+                          } catch (err) {
+                            console.error('Failed to cancel update:', err)
+                          }
+                        } else {
+                          // Just close the modal
                           setShowUpdateModal(false)
                         }
                       }}
-                      disabled={updateProgress?.downloading}
-                      className="flex-1 py-3 rounded-xl font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 py-3 rounded-xl font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                     >
-                      取消
+                      {updateProgress?.downloading ? '取消下载' : '取消'}
                     </button>
                     <button
                       onClick={async () => {
@@ -343,7 +356,7 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
                         } catch (err: unknown) {
                           const errorMessage = err instanceof Error ? err.message : '未知错误'
                           alert('更新失败：' + errorMessage)
-                          setShowUpdateModal(false)
+                          setUpdateProgress(null)
                         }
                       }}
                       disabled={updateProgress?.downloading}

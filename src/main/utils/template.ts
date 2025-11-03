@@ -73,7 +73,7 @@ export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
   tun: {
     enable: false,
     device: process.platform === 'darwin' ? undefined : 'mihomo',
-    stack: 'mixed',
+    stack: process.platform === 'darwin' ? 'system' : 'mixed',
     'auto-route': true,
     'auto-redirect': false,
     'auto-detect-interface': true,

@@ -51,11 +51,11 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>, a
   }
   controledMihomoConfig = deepMerge(controledMihomoConfig, patch)
   
-  // Ensure macOS TUN stack is set to 'system' for proper functionality
-  if (process.platform === 'darwin' && controledMihomoConfig.tun?.enable) {
+  // Ensure macOS TUN stack is always set to 'system' for proper TUN functionality with DNS hijacking
+  if (process.platform === 'darwin' && controledMihomoConfig.tun) {
     controledMihomoConfig.tun.stack = 'system'
-    controledMihomoConfig.tun['auto-route'] = true
-    controledMihomoConfig.tun['auto-detect-interface'] = true
+    controledMihomoConfig.tun['auto-route'] = controledMihomoConfig.tun['auto-route'] !== false ? true : false
+    controledMihomoConfig.tun['auto-detect-interface'] = controledMihomoConfig.tun['auto-detect-interface'] !== false ? true : false
   }
   
   console.log('[patchControledMihomoConfig] After merge, controledMihomoConfig.tun:', JSON.stringify(controledMihomoConfig.tun))

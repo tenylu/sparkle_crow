@@ -17,8 +17,8 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
   const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
   const { updateChannel = 'stable' } = await getAppConfig()
   
-  // Cloudflare R2 URL - replace with your actual R2 bucket URL
-  const baseUrl = 'https://update.crowmesh.com'
+  // Cloudflare R2 URL
+  const baseUrl = 'https://cloud.crowmesh.com'
   let url = `${baseUrl}/latest.yml`
   if (updateChannel == 'beta') {
     url = `${baseUrl}/latest-beta.yml`

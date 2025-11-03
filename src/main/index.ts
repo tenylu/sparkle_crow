@@ -13,7 +13,7 @@ import {
 } from 'electron'
 import os from 'os'
 import { addOverrideItem, addProfileItem, getAppConfig } from './config'
-import { quitWithoutCore, startCore, stopCore, restartCore } from './core/manager'
+import { quitWithoutCore, startCore, stopCore, restartCore, checkCorePermission } from './core/manager'
 import { triggerSysProxy, disableSysProxy } from './sys/sysproxy'
 import icon from '../../resources/icon.png?asset'
 import { createTray, updateTrayIconBrightness } from './resolve/tray'
@@ -783,28 +783,57 @@ app.whenReady().then(async () => {
       const { patchControledMihomoConfig } = await import('./config/controledMihomo')
       console.log(`[Main] Setting TUN to ${enable}`)
       
-      // Update controledMihomoConfig and restart core (TUN/DNS changes require restart)
-      if (enable) {
-        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } })
-        console.log('[Main] TUN enabled')
-        await triggerSysProxy(false, false)
-      } else {
-        await patchControledMihomoConfig({ tun: { enable: false } })
-        console.log('[Main] TUN disabled')
-        await triggerSysProxy(true, false)
+      // On macOS, check permissions before enabling TUN
+      if (enable && process.platform === 'darwin') {
+        const hasPermission = await checkCorePermission()
+        console.log('[Main] Current permission status:', hasPermission)
+        if (!hasPermission) {
+          console.log('[Main] No SUID permission, will try to grant during start')
+        }
       }
       
-      // Restart core to apply TUN/DNS changes
-      await restartCore()
-      console.log('[Main] TUN configuration applied successfully')
+      // Update controledMihomoConfig (skip autoGenerateProfile, will do it in restartCore)
+      if (enable) {
+        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } }, false)
+        console.log('[Main] TUN enabled')
+      } else {
+        await patchControledMihomoConfig({ tun: { enable: false } }, false)
+        console.log('[Main] TUN disabled')
+      }
       
-      // Notify renderer process
-      mainWindow?.webContents.send('controledMihomoConfigUpdated')
-      ipcMain.emit('updateTrayMenu')
-      
-      return { success: true }
+      try {
+        // Restart core to apply TUN/DNS changes (Mihomo doesn't support TUN hot reload)
+        await restartCore()
+        console.log('[Main] TUN configuration applied successfully')
+        
+        // Don't touch system proxy when toggling TUN
+        // Let user manually manage system proxy if needed
+        
+        // Notify renderer process
+        mainWindow?.webContents.send('controledMihomoConfigUpdated')
+        ipcMain.emit('updateTrayMenu')
+        
+        return { success: true }
+      } catch (restartError: any) {
+        console.error('[Main] restartCore failed:', restartError?.message || restartError)
+        
+        // Revert TUN config on error
+        await patchControledMihomoConfig({ tun: { enable: !enable } }, false)
+        mainWindow?.webContents.send('controledMihomoConfigUpdated')
+        ipcMain.emit('updateTrayMenu')
+        
+        return { success: false, message: restartError?.message || String(restartError) }
+      }
     } catch (error: any) {
       console.error('[Main] setTun error:', error?.message || error)
+      // Try to revert on any error
+      try {
+        await patchControledMihomoConfig({ tun: { enable: false } }, false)
+        mainWindow?.webContents.send('controledMihomoConfigUpdated')
+        ipcMain.emit('updateTrayMenu')
+      } catch (revertError) {
+        console.error('[Main] Failed to revert TUN config:', revertError)
+      }
       return { success: false, message: error?.message || String(error) }
     }
   })

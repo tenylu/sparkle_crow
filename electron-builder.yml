@@ -59,7 +59,7 @@ dmg:
     - x: 230
       y: 250
       type: file
-      path: ${name}-${version}-${arch}.app
+      path: ${productName}.app
 pkg:
   allowAnywhere: false
   allowCurrentUserHome: false
