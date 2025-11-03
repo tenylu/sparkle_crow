@@ -58,6 +58,9 @@ const api = {
     downloadAndInstallUpdate: (version: string) => ipcRenderer.invoke('downloadAndInstallUpdate', version),
     cancelUpdate: () => ipcRenderer.invoke('cancelUpdate'),
     getVersion: () => ipcRenderer.invoke('getVersion')
+  },
+  mihomo: {
+    getConfig: () => ipcRenderer.invoke('getControledMihomoConfig')
   }
 }
 // Use `contextBridge` APIs to expose Electron APIs to

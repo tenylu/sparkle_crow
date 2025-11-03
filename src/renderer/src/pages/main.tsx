@@ -31,7 +31,9 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
     setShowUpdateModal,
     updateInfo,
     isConnected,
-    language
+    language,
+    showSharedProxyModal,
+    setShowSharedProxyModal
   } = useAppStore()
   const t = useTranslation()
   const [updateProgress, setUpdateProgress] = useState<{ downloading: boolean; progress: number } | null>(null)

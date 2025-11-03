@@ -44,6 +44,9 @@ declare global {
         cancelUpdate: () => Promise<void>
         getVersion: () => Promise<string>
       }
+      mihomo: {
+        getConfig: () => Promise<any>
+      }
     }
   }
 }

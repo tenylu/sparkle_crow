@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 
 export const SharedProxyModal: React.FC = () => {
@@ -12,8 +12,32 @@ export const SharedProxyModal: React.FC = () => {
     isConnected 
   } = useAppStore()
 
-  const httpPort = '7890'
-  const socksPort = '7891'
+  const [httpPort, setHttpPort] = useState('7890')
+  const [socksPort, setSocksPort] = useState('7891')
+  const [allowLan, setAllowLan] = useState(false)
+
+  // Load port configuration when modal opens
+  useEffect(() => {
+    if (showSharedProxyModal) {
+      const loadConfig = async () => {
+        try {
+          const config = await window.api.mihomo.getConfig()
+          if (config) {
+            const mixedPort = config['mixed-port'] || 7890
+            const socks = config['socks-port'] || 7891
+            const allowLanEnabled = config['allow-lan'] || false
+            
+            setHttpPort(mixedPort.toString())
+            setSocksPort(socks.toString())
+            setAllowLan(allowLanEnabled)
+          }
+        } catch (error) {
+          console.error('[SharedProxy] Failed to load config:', error)
+        }
+      }
+      loadConfig()
+    }
+  }, [showSharedProxyModal])
 
   if (!showSharedProxyModal) return null
 
@@ -87,6 +111,17 @@ export const SharedProxyModal: React.FC = () => {
               
               {!isConnected && (
                 <p className="text-xs text-orange-500 dark:text-orange-400 text-center">提示：请先连接VPN以启用代理服务</p>
+              )}
+              
+              {!allowLan && isConnected && (
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4">
+                  <p className="text-xs text-red-600 dark:text-red-400 text-center font-semibold mb-1">⚠️ 局域网共享未开启</p>
+                  <p className="text-xs text-red-500 dark:text-red-500/70 text-center">需要在设置中开启"允许局域网连接"才能使用共享代理</p>
+                </div>
+              )}
+              
+              {allowLan && isConnected && (
+                <p className="text-xs text-green-600 dark:text-green-400 text-center">✅ 局域网共享已开启</p>
               )}
             </div>
           ) : (
