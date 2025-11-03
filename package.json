@@ -20,7 +20,7 @@
     "preinstall": "npx only-allow pnpm -y",
     "postinstall": "electron-builder install-app-deps",
     "build:win": "electron-vite build && electron-builder --publish never --win && pnpm checksum .exe .7z",
-    "build:mac": "electron-vite build && electron-builder --publish never --mac && pnpm checksum .pkg",
+    "build:mac": "electron-vite build && electron-builder --publish never --mac && pnpm checksum .zip .pkg",
     "build:linux": "electron-vite build && electron-builder --publish never --linux && pnpm checksum .deb .rpm .pkg.tar.xz AppImage"
   },
   "dependencies": {
