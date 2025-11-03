@@ -18,8 +18,10 @@ export async function getControledMihomoConfig(force = false): Promise<Partial<M
   return controledMihomoConfig
 }
 
-export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>): Promise<void> {
+export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>, autoGenerateProfile = true): Promise<void> {
   const { controlDns = true, controlSniff = true } = await getAppConfig()
+  console.log('[patchControledMihomoConfig] Before processing, controledMihomoConfig.tun:', JSON.stringify(controledMihomoConfig.tun))
+  console.log('[patchControledMihomoConfig] Patch:', JSON.stringify(patch))
   if (!controlDns) {
     delete controledMihomoConfig.dns
     delete controledMihomoConfig.hosts
@@ -45,6 +47,17 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>): 
     controledMihomoConfig.hosts = patch.hosts
   }
   controledMihomoConfig = deepMerge(controledMihomoConfig, patch)
+  console.log('[patchControledMihomoConfig] After merge, controledMihomoConfig.tun:', JSON.stringify(controledMihomoConfig.tun))
   await writeFile(controledMihomoConfigPath(), stringifyYaml(controledMihomoConfig), 'utf-8')
-  await generateProfile()
+  console.log('[patchControledMihomoConfig] Wrote to file')
+  
+  if (autoGenerateProfile) {
+    console.log('[patchControledMihomoConfig] Calling generateProfile')
+    await generateProfile()
+    console.log('[patchControledMihomoConfig] generateProfile completed')
+  } else {
+    console.log('[patchControledMihomoConfig] Skipping generateProfile (will be called later)')
+    // Clear cache so next getControledMihomoConfig() reads from disk
+    controledMihomoConfig = null as any
+  }
 }

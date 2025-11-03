@@ -664,13 +664,23 @@ app.whenReady().then(async () => {
     try {
       console.log('[Main] Switching to mode:', mode)
       
-      // Use the same approach as Sparkle's native mode switching
-      const { patchControledMihomoConfig } = await import('./config/controledMihomo')
-      const { patchMihomoConfig } = await import('./core/mihomoApi')
+      // Update proxy state with new mode
+      setXboardProxyState({ mode: mode as 'rule' | 'global' })
+      console.log('[Main] Updated proxy state with mode:', mode)
       
-      await patchControledMihomoConfig({ mode: mode })
-      await patchMihomoConfig({ mode: mode })
+      // Rebuild Xboard profile with unified config (including updated mode)
+      console.log('[Main] Rebuilding Xboard profile with unified config')
+      const profileId = 'xboard-vpn'
+      const unifiedConfig = await buildXboardConfig()
+      const configStr = stringifyYaml(unifiedConfig)
+      const { setProfileStr } = await import('./config')
+      await setProfileStr(profileId, configStr)
+      console.log('[Main] Profile updated with unified config')
       
+      // Restart core to apply (will call generateProfile to merge profile + controledMihomoConfig)
+      console.log('[Main] Restarting core to apply mode changes')
+      await stopCore()
+      await startCore()
       console.log('[Main] Mode switched successfully')
       
       // Send notification
@@ -770,39 +780,39 @@ app.whenReady().then(async () => {
   // TUN (virtual network card) toggle
   ipcMain.handle('xboard:setTun', async (_event, enable: boolean) => {
     try {
-      const { patchControledMihomoConfig, getControledMihomoConfig } = await import('./config/controledMihomo')
+      const { patchControledMihomoConfig } = await import('./config/controledMihomo')
+      const { patchMihomoConfig } = await import('./core/mihomoApi')
       console.log(`[Main] Setting TUN to ${enable}`)
-      // Enable DNS alongside TUN when enabling
+      
+      // Update controledMihomoConfig
       if (enable) {
-        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } })
+        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } }, false)
         console.log('[Main] TUN enabled, disabling system proxy')
-        // Disable system proxy when TUN is enabled
         await triggerSysProxy(false, false)
       } else {
-        await patchControledMihomoConfig({ tun: { enable: false } })
+        await patchControledMihomoConfig({ tun: { enable: false } }, false)
         console.log('[Main] TUN disabled, re-enabling system proxy')
-        // Re-enable system proxy when TUN is disabled
         await triggerSysProxy(true, false)
       }
-      // Verify configuration
-      const config = await getControledMihomoConfig()
-      console.log('[Main] Current TUN config:', JSON.stringify(config.tun))
       
-      // patchControledMihomoConfig already calls generateProfile() and writes to controledMihomoConfig
-      // Now we just need to rebuild the Xboard profile with the new TUN config and proxy state
-      console.log('[Main] Rebuilding Xboard profile with unified config')
-      const profileId = 'xboard-vpn'
-      const unifiedConfig = await buildXboardConfig()
-      const configStr = stringifyYaml(unifiedConfig)
-      const { setProfileStr } = await import('./config')
-      await setProfileStr(profileId, configStr)
-      console.log('[Main] Profile updated with unified config')
+      // Hot reload via API (no restart needed)
+      const { getControledMihomoConfig } = await import('./config/controledMihomo')
+      const controledMihomoConfig = await getControledMihomoConfig(true) // Force refresh from disk
+      const { mihomoConfig } = await import('./core/mihomoApi')
+      console.log('[Main] Patching Mihomo config via API for hot reload')
       
-      // Restart core to apply (will call generateProfile again which merges profile + controledMihomoConfig)
-      console.log('[Main] Restarting core to apply TUN changes')
-      await stopCore()
-      await startCore()
-      console.log('[Main] TUN configuration applied successfully')
+      try {
+        // Get current runtime config to preserve other settings
+        const currentRuntimeConfig = await mihomoConfig()
+        // Merge TUN config into runtime config
+        const updatedConfig = { ...currentRuntimeConfig, tun: controledMihomoConfig.tun as any }
+        await patchMihomoConfig(updatedConfig)
+        console.log('[Main] TUN configuration applied successfully via hot reload')
+      } catch (error: any) {
+        // If API is not available, just patch TUN config alone
+        console.log('[Main] Core not running or API unavailable, will be applied on next connection')
+        await patchMihomoConfig({ tun: controledMihomoConfig.tun as any })
+      }
       
       // Notify renderer process
       mainWindow?.webContents.send('controledMihomoConfigUpdated')

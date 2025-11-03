@@ -113,14 +113,14 @@ export function setXboardProxyState(state: Partial<XboardProxyState>): void {
 export async function buildXboardConfig(): Promise<any> {
   const { getControledMihomoConfig } = await import('./controledMihomo')
   const proxyState = getXboardProxyState()
-  const controledMihomoConfig = await getControledMihomoConfig()
+  const controledMihomoConfig = await getControledMihomoConfig(true) // Force refresh from disk
   
   console.log('[buildXboardConfig] Proxy state:', JSON.stringify(proxyState))
   console.log('[buildXboardConfig] TUN config:', JSON.stringify(controledMihomoConfig.tun))
   
   // Start with TUN/DNS/ports from controledMihomoConfig
   const config: any = {
-    port: 7890,
+    port: 0,
     'socks-port': 7891,
     'mixed-port': controledMihomoConfig['mixed-port'] || 7890,
     'allow-lan': controledMihomoConfig['allow-lan'] || false,
@@ -129,6 +129,13 @@ export async function buildXboardConfig(): Promise<any> {
     'secret': '',
     tun: controledMihomoConfig.tun || { enable: false },
     dns: controledMihomoConfig.dns || { enable: true },
+  }
+  
+  // Ensure TUN config has correct structure on macOS
+  if (config.tun && config.tun.enable && process.platform === 'darwin') {
+    config.tun.stack = config.tun.stack || 'system'
+    config.tun['auto-route'] = config.tun['auto-route'] !== false ? true : false
+    config.tun['auto-detect-interface'] = config.tun['auto-detect-interface'] !== false ? true : false
   }
   
   // If no proxy state, return minimal config
@@ -158,24 +165,23 @@ export async function buildXboardConfig(): Promise<any> {
     ]
   }
   
-  // Add panel IP to TUN route-exclude if TUN is enabled
+  // Add panel IP and LAN ranges to TUN route-exclude if TUN is enabled
   if (config.tun?.enable) {
     try {
       const { getBestLANIP } = await import('../utils/net')
       const lanIP = getBestLANIP()
+      config.tun['route-exclude-address'] = ['127.0.0.1/32']
       if (lanIP && lanIP !== '127.0.0.1') {
-        config.tun['route-exclude-address'] = [
-          '127.0.0.1/32',
-          `${lanIP}/32`
-        ]
+        config.tun['route-exclude-address'].push(`${lanIP}/32`)
         console.log('[Xboard Config] Added panel IP to TUN route-exclude:', lanIP)
       } else {
-        config.tun['route-exclude-address'] = ['127.0.0.1/32']
         console.log('[Xboard Config] Only localhost in TUN route-exclude')
       }
+      // Add LAN ranges to prevent routing panel traffic through TUN
+      config.tun['route-exclude-address'].push('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')
     } catch (error) {
       console.error('[Xboard Config] Failed to get LAN IP:', error)
-      config.tun['route-exclude-address'] = ['127.0.0.1/32']
+      config.tun['route-exclude-address'] = ['127.0.0.1/32', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
     }
   }
   
