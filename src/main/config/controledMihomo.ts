@@ -45,6 +45,6 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>): 
     controledMihomoConfig.hosts = patch.hosts
   }
   controledMihomoConfig = deepMerge(controledMihomoConfig, patch)
-  await generateProfile()
   await writeFile(controledMihomoConfigPath(), stringifyYaml(controledMihomoConfig), 'utf-8')
+  await generateProfile()
 }
