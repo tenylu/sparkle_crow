@@ -788,7 +788,8 @@ app.whenReady().then(async () => {
       const config = await getControledMihomoConfig()
       console.log('[Main] Current TUN config:', JSON.stringify(config.tun))
       
-      // Rebuild and update Xboard profile with unified config
+      // patchControledMihomoConfig already calls generateProfile() and writes to controledMihomoConfig
+      // Now we just need to rebuild the Xboard profile with the new TUN config and proxy state
       console.log('[Main] Rebuilding Xboard profile with unified config')
       const profileId = 'xboard-vpn'
       const unifiedConfig = await buildXboardConfig()
@@ -797,7 +798,7 @@ app.whenReady().then(async () => {
       await setProfileStr(profileId, configStr)
       console.log('[Main] Profile updated with unified config')
       
-      // Restart core to apply
+      // Restart core to apply (will call generateProfile again which merges profile + controledMihomoConfig)
       console.log('[Main] Restarting core to apply TUN changes')
       await stopCore()
       await startCore()

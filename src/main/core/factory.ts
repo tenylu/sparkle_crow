@@ -48,10 +48,12 @@ export async function generateProfile(): Promise<void> {
   runtimeConfigStr = stringifyYaml(profile)
   
   // Debug: Log TUN configuration
+  console.log('[Factory] Current profile TUN:', JSON.stringify(currentProfile.tun))
+  console.log('[Factory] ControledMihomo TUN:', JSON.stringify(controledMihomoConfig.tun))
   if (profile.tun) {
-    console.log('[Factory] TUN enabled in runtime config:', JSON.stringify(profile.tun))
+    console.log('[Factory] Merged TUN enabled in runtime config:', JSON.stringify(profile.tun))
   } else {
-    console.log('[Factory] TUN not enabled in runtime config')
+    console.log('[Factory] Merged TUN not enabled in runtime config')
   }
   
   if (diffWorkDir) {

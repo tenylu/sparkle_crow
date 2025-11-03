@@ -73,7 +73,9 @@ function readProxyState(): XboardProxyState | null {
   try {
     if (fs.existsSync(PROXY_STATE_FILE)) {
       const data = fs.readFileSync(PROXY_STATE_FILE, 'utf-8')
-      return JSON.parse(data)
+      const state = JSON.parse(data)
+      console.log('[ProxyState] Read proxy state from:', PROXY_STATE_FILE, 'selected:', state.selectedNodeName)
+      return state
     }
   } catch (error) {
     console.error('Failed to read proxy state:', error)
@@ -88,6 +90,7 @@ function writeProxyState(state: XboardProxyState): void {
       fs.mkdirSync(dir, { recursive: true })
     }
     fs.writeFileSync(PROXY_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
+    console.log('[ProxyState] Written proxy state to:', PROXY_STATE_FILE)
   } catch (error) {
     console.error('Failed to write proxy state:', error)
     throw error
