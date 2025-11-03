@@ -772,8 +772,12 @@ app.whenReady().then(async () => {
       // Enable DNS alongside TUN when enabling
       if (enable) {
         await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } } as any)
+        // Disable system proxy when TUN is enabled
+        await triggerSysProxy(false, false)
       } else {
         await patchControledMihomoConfig({ tun: { enable: false } } as any)
+        // Re-enable system proxy when TUN is disabled
+        await triggerSysProxy(true, false)
       }
       // Restart core to apply
       await stopCore()
