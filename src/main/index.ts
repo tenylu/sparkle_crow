@@ -781,37 +781,27 @@ app.whenReady().then(async () => {
   ipcMain.handle('xboard:setTun', async (_event, enable: boolean) => {
     try {
       const { patchControledMihomoConfig } = await import('./config/controledMihomo')
-      const { patchMihomoConfig } = await import('./core/mihomoApi')
+      const { restartCore } = await import('./core/manager')
       console.log(`[Main] Setting TUN to ${enable}`)
       
-      // Update controledMihomoConfig
+      // Update controledMihomoConfig and restart core (like original Sparkle)
       if (enable) {
-        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } }, false)
-        console.log('[Main] TUN enabled, disabling system proxy')
+        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } })
+        console.log('[Main] TUN enabled')
         await triggerSysProxy(false, false)
       } else {
-        await patchControledMihomoConfig({ tun: { enable: false } }, false)
-        console.log('[Main] TUN disabled, re-enabling system proxy')
+        await patchControledMihomoConfig({ tun: { enable: false } })
+        console.log('[Main] TUN disabled')
         await triggerSysProxy(true, false)
       }
       
-      // Hot reload via API (no restart needed)
-      const { getControledMihomoConfig } = await import('./config/controledMihomo')
-      const controledMihomoConfig = await getControledMihomoConfig(true) // Force refresh from disk
-      const { mihomoConfig } = await import('./core/mihomoApi')
-      console.log('[Main] Patching Mihomo config via API for hot reload')
+      await restartCore()
+      console.log('[Main] TUN configuration applied successfully')
       
-      try {
-        // Get current runtime config to preserve other settings
-        const currentRuntimeConfig = await mihomoConfig()
-        // Merge TUN config into runtime config
-        const updatedConfig = { ...currentRuntimeConfig, tun: controledMihomoConfig.tun as any }
-        await patchMihomoConfig(updatedConfig)
-        console.log('[Main] TUN configuration applied successfully via hot reload')
-      } catch (error: any) {
-        // If API is not available, configuration will be applied on next connection
-        console.log('[Main] Core not running or API unavailable, will be applied on next connection')
-      }
+      // Update tray icon
+      const { getControledMihomoConfig } = await import('./config/controledMihomo')
+      const controledMihomoConfig = await getControledMihomoConfig()
+      const tunEnabled = Boolean(controledMihomoConfig?.tun?.enable)
       
       // Notify renderer process
       mainWindow?.webContents.send('controledMihomoConfigUpdated')
