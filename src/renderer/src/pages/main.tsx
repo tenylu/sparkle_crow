@@ -5,7 +5,7 @@ import { ConnectButton } from '../components/ConnectButton'
 import { StatusCard } from '../components/StatusCard'
 import { NodeSelector } from '../components/NodeSelector'
 import { ProxyModeSelector } from '../components/ProxyModeSelector'
-import { TunToggle } from '../components/TunToggle'
+// import { TunToggle } from '../components/TunToggle'
 import { UserMenu } from '../components/UserMenu'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { SharedProxyModal } from '../components/SharedProxyModal'
@@ -384,9 +384,9 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
         <div className="absolute bottom-0 left-0 right-0 p-6 space-y-3 z-0">
           <NodeSelector />
           <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-3xl shadow-2xl p-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <ProxyModeSelector />
-              <TunToggle />
+              {/* <TunToggle /> */}
             </div>
           </div>
         </div>

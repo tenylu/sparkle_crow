@@ -606,9 +606,6 @@ app.whenReady().then(async () => {
       // Start Mihomo core (already imported at top of file)
       await startCore()
       
-      // Wait a bit for core to fully start
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       // Check TUN status: only enable system proxy if TUN is not enabled
       const { getControledMihomoConfig } = await import('./config/controledMihomo')
       const controledMihomoConfig = await getControledMihomoConfig()
