@@ -46,6 +46,14 @@ export async function generateProfile(): Promise<void> {
 
   runtimeConfig = profile
   runtimeConfigStr = stringifyYaml(profile)
+  
+  // Debug: Log TUN configuration
+  if (profile.tun) {
+    console.log('[Factory] TUN enabled in runtime config:', JSON.stringify(profile.tun))
+  } else {
+    console.log('[Factory] TUN not enabled in runtime config')
+  }
+  
   if (diffWorkDir) {
     await prepareProfileWorkDir(current)
   }

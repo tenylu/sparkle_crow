@@ -33,7 +33,7 @@ import iconv from 'iconv-lite'
 import { getAppConfigSync } from './config/app'
 import { getUserAgent } from './utils/userAgent'
 import { XboardClient } from './api/xboard-client'
-import { getXboardConfig, setXboardConfig, isLoggedIn, clearXboardConfig } from './config/xboard'
+import { getXboardConfig, setXboardConfig, isLoggedIn, clearXboardConfig, setXboardProxyState, buildXboardConfig } from './config/xboard'
 import { fetchSubscribe, parseClashYAML, type ParsedNode } from './api/subscribe-parser'
 import { stringifyYaml } from './utils/yaml'
 import YAML from 'yaml'
@@ -555,26 +555,12 @@ app.whenReady().then(async () => {
       
       console.log('[Main] Found selected node:', selectedProxy.name)
       
-      // Generate minimal Mihomo config based on mode
-      const minimalConfig: any = {
-        port: 7890,
-        'socks-port': 7891,
-        'mixed-port': 7890,
-        'allow-lan': true,
-        'log-level': 'info',
-        'external-controller': '127.0.0.1:9090',
-        'secret': '',
+      // Save proxy state for unified config building
+      setXboardProxyState({
+        selectedNodeName: nodeName,
+        mode: mode as 'rule' | 'global',
         proxies: doc.proxies,
-        proxy: selectedProxy.name
-      }
-      
-      // Set rules based on mode
-      if (mode === 'global') {
-        minimalConfig.mode = 'global'
-        minimalConfig.rules = [] // No rules for global mode
-      } else {
-        minimalConfig.mode = 'rule'
-        minimalConfig.rules = [
+        rules: mode === 'global' ? [] : [
           'DOMAIN-SUFFIX,local,DIRECT',
           'IP-CIDR,127.0.0.0/8,DIRECT',
           'IP-CIDR,172.16.0.0/12,DIRECT',
@@ -583,9 +569,9 @@ app.whenReady().then(async () => {
           'GEOIP,CN,DIRECT',
           `MATCH,${selectedProxy.name}`
         ]
-      }
+      })
       
-      console.log('[Main] Creating config with mode:', mode)
+      console.log('[Main] Saved proxy state for mode:', mode)
       
       // Create a local profile for this connection
       const profileId = 'xboard-vpn'
@@ -605,8 +591,12 @@ app.whenReady().then(async () => {
         })
       }
       
+      // Build unified config using buildXboardConfig
+      const unifiedConfig = await buildXboardConfig()
+      console.log('[Main] Built unified config:', JSON.stringify(unifiedConfig))
+      
       // Set the profile content
-      const configStr = stringifyYaml(minimalConfig)
+      const configStr = stringifyYaml(unifiedConfig)
       await setProfileStr(profileId, configStr)
       
       // Change to this profile
@@ -619,8 +609,20 @@ app.whenReady().then(async () => {
       // Wait a bit for core to fully start
       await new Promise(resolve => setTimeout(resolve, 1000))
       
-      // Enable system proxy (already imported at top of file)
-      await triggerSysProxy(true, false)
+      // Check TUN status: only enable system proxy if TUN is not enabled
+      const { getControledMihomoConfig } = await import('./config/controledMihomo')
+      const controledMihomoConfig = await getControledMihomoConfig()
+      const tunEnabled = Boolean(controledMihomoConfig?.tun?.enable)
+      
+      console.log('[Main] TUN enabled:', tunEnabled)
+      
+      if (!tunEnabled) {
+        // Enable system proxy (already imported at top of file)
+        console.log('[Main] Enabling system proxy')
+        await triggerSysProxy(true, false)
+      } else {
+        console.log('[Main] TUN is enabled, skipping system proxy')
+      }
       
       console.log('[Main] VPN connected with mode:', mode)
       
@@ -768,20 +770,43 @@ app.whenReady().then(async () => {
   // TUN (virtual network card) toggle
   ipcMain.handle('xboard:setTun', async (_event, enable: boolean) => {
     try {
-      const { patchControledMihomoConfig } = await import('./config/controledMihomo')
+      const { patchControledMihomoConfig, getControledMihomoConfig } = await import('./config/controledMihomo')
+      console.log(`[Main] Setting TUN to ${enable}`)
       // Enable DNS alongside TUN when enabling
       if (enable) {
-        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } } as any)
+        await patchControledMihomoConfig({ tun: { enable: true }, dns: { enable: true } })
+        console.log('[Main] TUN enabled, disabling system proxy')
         // Disable system proxy when TUN is enabled
         await triggerSysProxy(false, false)
       } else {
-        await patchControledMihomoConfig({ tun: { enable: false } } as any)
+        await patchControledMihomoConfig({ tun: { enable: false } })
+        console.log('[Main] TUN disabled, re-enabling system proxy')
         // Re-enable system proxy when TUN is disabled
         await triggerSysProxy(true, false)
       }
+      // Verify configuration
+      const config = await getControledMihomoConfig()
+      console.log('[Main] Current TUN config:', JSON.stringify(config.tun))
+      
+      // Rebuild and update Xboard profile with unified config
+      console.log('[Main] Rebuilding Xboard profile with unified config')
+      const profileId = 'xboard-vpn'
+      const unifiedConfig = await buildXboardConfig()
+      const configStr = stringifyYaml(unifiedConfig)
+      const { setProfileStr } = await import('./config')
+      await setProfileStr(profileId, configStr)
+      console.log('[Main] Profile updated with unified config')
+      
       // Restart core to apply
+      console.log('[Main] Restarting core to apply TUN changes')
       await stopCore()
       await startCore()
+      console.log('[Main] TUN configuration applied successfully')
+      
+      // Notify renderer process
+      mainWindow?.webContents.send('controledMihomoConfigUpdated')
+      ipcMain.emit('updateTrayMenu')
+      
       return { success: true }
     } catch (error: any) {
       console.error('[Main] setTun error:', error?.message || error)

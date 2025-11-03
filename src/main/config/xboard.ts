@@ -3,11 +3,19 @@ import path from 'path'
 import { app } from 'electron'
 
 const CONFIG_FILE = path.join(app.getPath('userData'), 'xboard-config.json')
+const PROXY_STATE_FILE = path.join(app.getPath('userData'), 'xboard-proxy-state.json')
 
 export interface XboardConfig {
   baseURL: string
   token: string
   email: string
+}
+
+export interface XboardProxyState {
+  selectedNodeName?: string
+  mode?: 'rule' | 'global'
+  proxies?: any[]
+  rules?: any[]
 }
 
 function readConfig(): XboardConfig | null {
@@ -58,6 +66,119 @@ export function clearXboardConfig(): void {
   } catch (error) {
     console.error('Failed to clear config:', error)
   }
+}
+
+// Proxy state management
+function readProxyState(): XboardProxyState | null {
+  try {
+    if (fs.existsSync(PROXY_STATE_FILE)) {
+      const data = fs.readFileSync(PROXY_STATE_FILE, 'utf-8')
+      return JSON.parse(data)
+    }
+  } catch (error) {
+    console.error('Failed to read proxy state:', error)
+  }
+  return null
+}
+
+function writeProxyState(state: XboardProxyState): void {
+  try {
+    const dir = path.dirname(PROXY_STATE_FILE)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(PROXY_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
+  } catch (error) {
+    console.error('Failed to write proxy state:', error)
+    throw error
+  }
+}
+
+export function getXboardProxyState(): XboardProxyState | null {
+  return readProxyState()
+}
+
+export function setXboardProxyState(state: Partial<XboardProxyState>): void {
+  const current = readProxyState() || { selectedNodeName: undefined, mode: undefined, proxies: undefined, rules: undefined }
+  const updated = { ...current, ...state }
+  writeProxyState(updated)
+}
+
+/**
+ * Build unified Xboard configuration combining proxy, TUN, and other settings
+ */
+export async function buildXboardConfig(): Promise<any> {
+  const { getControledMihomoConfig } = await import('./controledMihomo')
+  const proxyState = getXboardProxyState()
+  const controledMihomoConfig = await getControledMihomoConfig()
+  
+  console.log('[buildXboardConfig] Proxy state:', JSON.stringify(proxyState))
+  console.log('[buildXboardConfig] TUN config:', JSON.stringify(controledMihomoConfig.tun))
+  
+  // Start with TUN/DNS/ports from controledMihomoConfig
+  const config: any = {
+    port: 7890,
+    'socks-port': 7891,
+    'mixed-port': controledMihomoConfig['mixed-port'] || 7890,
+    'allow-lan': controledMihomoConfig['allow-lan'] || false,
+    'log-level': 'info',
+    'external-controller': '127.0.0.1:9090',
+    'secret': '',
+    tun: controledMihomoConfig.tun || { enable: false },
+    dns: controledMihomoConfig.dns || { enable: true },
+  }
+  
+  // If no proxy state, return minimal config
+  if (!proxyState?.proxies || !proxyState.selectedNodeName) {
+    console.log('[buildXboardConfig] No proxy state, returning minimal config')
+    return config
+  }
+  
+  console.log('[buildXboardConfig] Adding proxies and rules, selected node:', proxyState.selectedNodeName)
+  
+  // Add proxies and rules
+  config.proxies = proxyState.proxies
+  config.proxy = proxyState.selectedNodeName
+  config.mode = proxyState.mode || 'rule'
+  
+  if (proxyState.mode === 'global') {
+    config.rules = []
+  } else {
+    config.rules = [
+      'DOMAIN-SUFFIX,local,DIRECT',
+      'IP-CIDR,127.0.0.0/8,DIRECT',
+      'IP-CIDR,172.16.0.0/12,DIRECT',
+      'IP-CIDR,192.168.0.0/16,DIRECT',
+      'IP-CIDR,10.0.0.0/8,DIRECT',
+      'GEOIP,CN,DIRECT',
+      `MATCH,${proxyState.selectedNodeName}`
+    ]
+  }
+  
+  // Add panel IP to TUN route-exclude if TUN is enabled
+  if (config.tun?.enable) {
+    try {
+      const { getBestLANIP } = await import('../utils/net')
+      const lanIP = getBestLANIP()
+      if (lanIP && lanIP !== '127.0.0.1') {
+        config.tun['route-exclude-address'] = [
+          '127.0.0.1/32',
+          `${lanIP}/32`
+        ]
+        console.log('[Xboard Config] Added panel IP to TUN route-exclude:', lanIP)
+      } else {
+        config.tun['route-exclude-address'] = ['127.0.0.1/32']
+        console.log('[Xboard Config] Only localhost in TUN route-exclude')
+      }
+    } catch (error) {
+      console.error('[Xboard Config] Failed to get LAN IP:', error)
+      config.tun['route-exclude-address'] = ['127.0.0.1/32']
+    }
+  }
+  
+  console.log('[buildXboardConfig] Final config - proxies:', config.proxies?.length || 0, 'selected:', config.proxy, 'tun:', config.tun?.enable)
+  
+  return config
 }
 
 
