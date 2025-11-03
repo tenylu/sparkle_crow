@@ -155,8 +155,10 @@ export async function createTray(): Promise<void> {
   }
   if (process.platform === 'darwin') {
     const icon = nativeImage.createFromPath(templateIcon).resize({ height: 16 })
-    icon.setTemplateImage(true)
+    icon.setTemplateImage(true) // 默认是暗色（未连接状态）
     tray = new Tray(icon)
+    // 初始状态是断开连接（暗色）
+    connectionStatus = false
   }
   if (process.platform === 'win32') {
     tray = new Tray(icoIcon)
@@ -258,17 +260,17 @@ export async function updateTrayIconBrightness(isConnected: boolean): Promise<vo
   
   try {
     if (process.platform === 'darwin') {
-      // On macOS, toggle template mode to simulate brightness change
+      // On macOS, use template image which adapts to system appearance
       const icon = nativeImage.createFromPath(templateIcon).resize({ height: 16 })
-      icon.setTemplateImage(!isConnected) // Connected = template off (lighter), Disconnected = template on (darker)
+      // Template mode for consistent appearance across light/dark themes
+      icon.setTemplateImage(true)
       tray.setImage(icon)
     } else if (process.platform === 'win32') {
-      // On Windows, create a modified icon with different opacity
+      // On Windows, use full brightness icon
       const baseImage = nativeImage.createFromPath(icoIcon)
-      // Windows doesn't support opacity changes easily, so just toggle brightness
       tray.setImage(baseImage)
     } else if (process.platform === 'linux') {
-      // On Linux, similar approach
+      // On Linux, use standard icon
       tray.setImage(pngIcon)
     }
     
