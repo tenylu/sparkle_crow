@@ -809,9 +809,8 @@ app.whenReady().then(async () => {
         await patchMihomoConfig(updatedConfig)
         console.log('[Main] TUN configuration applied successfully via hot reload')
       } catch (error: any) {
-        // If API is not available, just patch TUN config alone
+        // If API is not available, configuration will be applied on next connection
         console.log('[Main] Core not running or API unavailable, will be applied on next connection')
-        await patchMihomoConfig({ tun: controledMihomoConfig.tun as any })
       }
       
       // Notify renderer process
