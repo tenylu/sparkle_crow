@@ -38,6 +38,7 @@ nsis:
   oneClick: false
   perMachine: true
   createDesktopShortcut: true
+  runAfterFinish: true
 mac:
   target:
     - target: zip

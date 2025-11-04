@@ -167,20 +167,44 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
     if (file.endsWith('.exe')) {
       // For Windows .exe installer:
       // 1. Exit the app first (this releases file locks)
-      // 2. Launch installer with /S (silent) and /R (run after install) flags
-      // 3. Installer will automatically restart the app after installation
+      // 2. Launch installer with /S (silent) flag
+      // 3. Installer will automatically restart the app after installation (via runAfterFinish: true)
       const installerPath = path.join(dataDir(), file)
-      setNotQuitDialog()
-      app.quit()
       
-      // Wait for app to quit, then launch installer
-      setTimeout(() => {
-        spawn(installerPath, ['/S', '/R'], {
-          detached: true,
-          stdio: 'ignore',
-          shell: false
-        }).unref()
-      }, 1000)
+      // Show dialog to inform user
+      if (mainWindow) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '准备安装更新',
+          message: '即将退出应用并启动安装程序',
+          detail: '安装程序将在安装完成后自动重启应用。',
+          buttons: ['确定']
+        }).then(() => {
+          setNotQuitDialog()
+          app.quit()
+          
+          // Wait for app to quit, then launch installer
+          setTimeout(() => {
+            spawn(installerPath, ['/S'], {
+              detached: true,
+              stdio: 'ignore',
+              shell: false
+            }).unref()
+          }, 1000)
+        })
+      } else {
+        // If no main window, just quit and launch installer
+        setNotQuitDialog()
+        app.quit()
+        
+        setTimeout(() => {
+          spawn(installerPath, ['/S'], {
+            detached: true,
+            stdio: 'ignore',
+            shell: false
+          }).unref()
+        }, 1000)
+      }
     } else if (file.endsWith('.7z')) {
       // For portable Windows .7z:
       // 1. Extract files
