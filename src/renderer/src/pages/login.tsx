@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../hooks/useTranslation'
+import { QuitConfirmModal } from '../components/QuitConfirmModal'
 import logoImg from '../assets/logo.png'
 
 interface LoginProps {
@@ -30,6 +31,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [downloadingUpdate, setDownloadingUpdate] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<{ downloading: boolean; progress: number } | null>(null)
   const [hasUpdateAvailable, setHasUpdateAvailable] = useState(false)
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false)
   const { language, setLanguage, theme, setTheme } = useAppStore()
   const t = useTranslation()
 
@@ -89,6 +91,14 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       return () => clearTimeout(timer)
     }
   }, [error])
+
+  // Listen for quit confirmation request
+  useEffect(() => {
+    const unsubscribe = window.api.onQuitConfirm(() => {
+      setShowQuitConfirm(true)
+    })
+    return unsubscribe
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -793,6 +803,20 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             </div>
           </div>
         </>
+      )}
+
+      {/* Quit Confirmation Modal */}
+      {showQuitConfirm && (
+        <QuitConfirmModal
+          onConfirm={() => {
+            window.api.sendQuitConfirmResult(true)
+            setShowQuitConfirm(false)
+          }}
+          onCancel={() => {
+            window.api.sendQuitConfirmResult(false)
+            setShowQuitConfirm(false)
+          }}
+        />
       )}
     </div>
   )

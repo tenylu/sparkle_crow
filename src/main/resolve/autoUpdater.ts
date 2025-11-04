@@ -48,8 +48,8 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
 export async function downloadAndInstallUpdate(version: string): Promise<void> {
   const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
   
-  // Cloudflare R2 URL
-  const baseUrl = 'https://update.crowmesh.com'
+  // Cloudflare R2 URL - use same base URL as checkUpdate
+  const baseUrl = 'https://cloud.crowmesh.com'
   const fileMap = {
     'win32-x64': `crowvpn-windows-${version}-x64-setup.exe`,
     'win32-arm64': `crowvpn-windows-${version}-arm64-setup.exe`,

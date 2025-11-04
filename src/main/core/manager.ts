@@ -112,6 +112,46 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   await generateProfile()
   await checkProfile()
   
+  // Always clean up socket file before starting (even if not running)
+  // This handles cases where previous instance crashed and left socket file
+  const socketPath = mihomoIpcPath()
+  if (existsSync(socketPath)) {
+    console.log('[Manager] Found existing socket file, attempting cleanup')
+    try {
+      // Try to kill any process using the socket
+      try {
+        const execPromise = promisify(exec)
+        const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+        const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+        if (pids.length > 0) {
+          console.log(`[Manager] Found ${pids.length} process(es) using socket: ${pids.join(', ')}`)
+          for (const pidStr of pids) {
+            const pid = parseInt(pidStr)
+            if (!isNaN(pid)) {
+              try {
+                process.kill(pid, 'SIGTERM')
+                console.log(`[Manager] Sent SIGTERM to PID ${pid}`)
+              } catch {
+                // Process might not exist
+              }
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
+      } catch {
+        // lsof might not be available or failed, continue anyway
+      }
+      
+      // Remove socket file
+      await rm(socketPath)
+      console.log('[Manager] Removed existing socket file')
+      // Wait for filesystem to update
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    } catch (err) {
+      console.log('[Manager] Failed to remove socket, may cause startup issue:', err)
+    }
+  }
+  
   // Only stop core if it's already running
   const running = await isCoreRunning()
   if (running) {
@@ -119,18 +159,17 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     // Wait a bit for the socket to be released
     await new Promise((resolve) => setTimeout(resolve, 1000))
     
-      // Force remove socket if it still exists
-      const socketPath = mihomoIpcPath()
-      if (existsSync(socketPath)) {
-        console.log('[Manager] Force removing lingering socket file')
-        try {
-          await rm(socketPath)
-        } catch (err) {
-          console.log('[Manager] Failed to remove socket, may cause startup issue')
-        }
-        // Wait again for filesystem to update
-        await new Promise((resolve) => setTimeout(resolve, 500))
+    // Force remove socket if it still exists after stop
+    if (existsSync(socketPath)) {
+      console.log('[Manager] Force removing lingering socket file after stopCore')
+      try {
+        await rm(socketPath)
+      } catch (err) {
+        console.log('[Manager] Failed to remove socket, may cause startup issue')
       }
+      // Wait again for filesystem to update
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
   }
   if (tun?.enable && autoSetDNS) {
     try {
@@ -213,7 +252,6 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
           mainWindow?.webContents.send('controledMihomoConfigUpdated')
           ipcMain.emit('updateTrayMenu')
           
-          const { dialog } = require('electron')
           const corePath = mihomoCorePath(await getAppConfig().then(cfg => cfg.core))
           dialog.showErrorBox(
             '权限授予失败',
@@ -258,7 +296,6 @@ sudo chmod +sx "${corePath}"
           
           // Show helpful error message with instructions
           const corePath = mihomoCorePath(await getAppConfig().then(cfg => cfg.core))
-          const { dialog } = require('electron')
           dialog.showErrorBox(
             '权限授予失败',
             `虚拟网卡需要管理员权限，但自动授权失败。
@@ -558,7 +595,7 @@ export async function isCoreRunning(): Promise<boolean> {
     }
     // Try to connect to the API socket to verify if core is running
     const axiosIns = await getAxios(true) // Force refresh
-    const response = await axiosIns.get('/version')
+    const response = await axiosIns.get('/version') as { version?: string }
     return response?.version !== undefined
   } catch (error) {
     return false
