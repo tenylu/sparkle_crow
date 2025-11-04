@@ -73,6 +73,13 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   let corePath: string
   try {
     corePath = mihomoCorePath(core)
+    // Check if core executable exists
+    if (!existsSync(corePath)) {
+      const errorMsg = `内核可执行文件不存在: ${corePath}\n请重新安装应用程序或检查内核文件是否完整。`
+      console.error('[Manager]', errorMsg)
+      await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+      throw new Error(errorMsg)
+    }
   } catch (error) {
     if (core === 'system') {
       await patchAppConfig({ core: 'mihomo' })
@@ -370,20 +377,40 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     PATH: process.env.PATH
   }
   let initialized = false
-  child = spawn(
-    corePath,
-    [
-      '-d',
-      diffWorkDir ? mihomoProfileWorkDir(current) : mihomoWorkDir(),
-      ctlParam,
-      mihomoIpcPath()
-    ],
-    {
-      detached: detached,
-      stdio: detached ? 'ignore' : undefined,
-      env: env
-    }
-  )
+  try {
+    child = spawn(
+      corePath,
+      [
+        '-d',
+        diffWorkDir ? mihomoProfileWorkDir(current) : mihomoWorkDir(),
+        ctlParam,
+        mihomoIpcPath()
+      ],
+      {
+        detached: detached,
+        stdio: detached ? 'ignore' : undefined,
+        env: env
+      }
+    )
+  } catch (spawnError: any) {
+    const errorMsg = spawnError.code === 'UNKNOWN' || spawnError.message?.includes('spawn')
+      ? `内核启动失败: ${spawnError.message}\n内核路径: ${corePath}\n请检查内核文件是否存在且可执行。`
+      : `内核启动失败: ${spawnError.message || spawnError}`
+    console.error('[Manager] Spawn error:', errorMsg)
+    await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+    throw new Error(errorMsg)
+  }
+  
+  // Handle spawn errors immediately after creation
+  child.on('error', (spawnError: any) => {
+    const errorMsg = spawnError.code === 'UNKNOWN' || spawnError.message?.includes('spawn')
+      ? `内核启动失败: ${spawnError.message}\n内核路径: ${corePath}\n请检查内核文件是否存在且可执行。`
+      : `内核启动失败: ${spawnError.message || spawnError}`
+    console.error('[Manager] Child process error:', errorMsg)
+    writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' }).catch(() => {})
+    dialog.showErrorBox('内核启动错误', errorMsg)
+  })
+  
   if (process.platform === 'win32' && child.pid) {
     os.setPriority(child.pid, os.constants.priority[mihomoCpuPriority])
   }

@@ -103,7 +103,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            pnpm build:win ${{ matrix.format }} --${{ matrix.arch }}
+            pnpm electron-vite build
+            pnpm electron-builder --publish never --win ${{ matrix.format }} --${{ matrix.arch }}
+            pnpm checksum .exe .7z
           else
             pnpm electron-vite build
             pnpm electron-builder --publish never --mac --${{ matrix.arch }}
