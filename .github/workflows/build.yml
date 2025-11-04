@@ -219,9 +219,16 @@ jobs:
           fi
           
           echo "Generating changelog from ${RANGE}"
-          TEXT=$(git log ${RANGE} --pretty=format:%s | grep -v '[0-9]\+\.[0-9]\+\.[0-9]\+$' | sed ':a;N;$!ba;s/\n/\\n/g')
-          QUESTION="Translate into Chinese:\n"""\n$TEXT\n""""
-          PAYLOAD=$(cat <<EOF
+          TEXT=$(git log ${RANGE} --pretty=format:%s | grep -v '[0-9]\+\.[0-9]\+\.[0-9]\+$' | sed ':a;N;$!ba;s/\n/\\n/g' || echo "")
+          
+          # If no text or API not available, create simple changelog
+          if [ -z "$TEXT" ] || [ -z "$API_URL" ] || [ -z "$API_KEY" ]; then
+            echo '# 更新日志' > changelog.md
+            echo ' - 修复了一些已知问题' >> changelog.md
+            echo "Skipping API translation (no text or API credentials)"
+          else
+            QUESTION="Translate into Chinese:\n"""\n$TEXT\n""""
+            PAYLOAD=$(cat <<EOF
           {
             "stream": false,
             "model": "gpt-5-mini",
@@ -238,29 +245,69 @@ jobs:
           }
           EOF
           )
-          RESPONSE=$(curl -s -X POST "$API_URL/v1/chat/completions" \
-            -H "Authorization: Bearer $API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
-            --max-time 30)
-          echo '# 更新日志' > changelog.md
-          echo $RESPONSE | jq .choices[0].message.content -r | sed 's/\\n/\n/g' | sed 's/^/ - /g' >> changelog.md
+            RESPONSE=$(curl -s -X POST "$API_URL/v1/chat/completions" \
+              -H "Authorization: Bearer $API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              --max-time 30 || echo "")
+            
+            echo '# 更新日志' > changelog.md
+            if [ -n "$RESPONSE" ]; then
+              TRANSLATED=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null || echo "")
+              if [ -n "$TRANSLATED" ]; then
+                echo "$TRANSLATED" | sed 's/\\n/\n/g' | sed 's/^/ - /g' >> changelog.md
+              else
+                echo ' - 修复了一些已知问题' >> changelog.md
+              fi
+            else
+              echo ' - 修复了一些已知问题' >> changelog.md
+            fi
+          fi
+          
+          # Ensure changelog.md exists
+          if [ ! -f changelog.md ]; then
+            echo '# 更新日志' > changelog.md
+            echo ' - 修复了一些已知问题' >> changelog.md
+          fi
+          
+          echo "Changelog generated:"
+          cat changelog.md
 
       - name: Update Version
         run: |
-          INPUT_VERSION="${{ github.event.inputs.version }}"
-          CLEAN_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
-          if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version format: $INPUT_VERSION"
+          # Determine version from tag or input
+          if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/v ]]; then
+            # Extract version from tag
+            CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+            CLEAN_VERSION=$(echo "$CURRENT_TAG" | sed 's/^v//')
+          elif [ "${{ github.event.inputs.version }}" != "" ]; then
+            # Use version from workflow_dispatch input
+            INPUT_VERSION="${{ github.event.inputs.version }}"
+            CLEAN_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
+          else
+            echo "Error: Could not determine version"
             exit 1
           fi
-          jq --arg version "$CLEAN_VERSION" '.version = $version' package.json > tmp.json && mv tmp.json package.json
+          
+          # Validate version format
+          if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format: $CLEAN_VERSION"
+            exit 1
+          fi
+          
+          # Update package.json only if version changed
+          CURRENT_PKG_VERSION=$(jq -r '.version' package.json)
+          if [ "$CURRENT_PKG_VERSION" != "$CLEAN_VERSION" ]; then
+            jq --arg version "$CLEAN_VERSION" '.version = $version' package.json > tmp.json && mv tmp.json package.json
 
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git add package.json
-          git commit -m "update version to $CLEAN_VERSION"
-          git push
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git config --global user.name "github-actions[bot]"
+            git add package.json
+            git commit -m "update version to $CLEAN_VERSION" || echo "No changes to commit"
+            git push || echo "Nothing to push"
+          else
+            echo "Version already matches: $CLEAN_VERSION"
+          fi
 
       - name: Install Dependencies and Updater
         run: |
@@ -273,18 +320,32 @@ jobs:
           path: bin/
           merge-multiple: true
 
+      - name: Determine Tag Name
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/v ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          elif [ "${{ github.event.inputs.version }}" != "" ]; then
+            TAG_NAME="${{ github.event.inputs.version }}"
+          else
+            echo "Error: Could not determine tag name"
+            exit 1
+          fi
+          echo "name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Tag name: $TAG_NAME"
+
       - name: Delete Current
         uses: 8Mi-Tech/delete-release-assets-action@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref }}
+          tag: ${{ steps.tag.outputs.name }}
           deleteOnlyFromDrafts: false
 
       - name: Publish Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref }}
+          tag_name: ${{ steps.tag.outputs.name }}
           body_path: changelog.md
           files: |
             latest.yml
