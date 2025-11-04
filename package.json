@@ -1,6 +1,6 @@
 {
   "name": "crowvpn",
-  "version": "2.0.4",
+  "version": "2.0.0",
   "description": "CrowVPN",
   "main": "./out/main/index.js",
   "author": "crowmesh",

@@ -43,6 +43,7 @@ mac:
   target:
     - zip
     - pkg
+  icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -55,9 +56,6 @@ pkg:
   allowAnywhere: false
   allowCurrentUserHome: false
   scripts: pkg-scripts
-  # background:
-  #   alignment: bottomleft
-  #   file: build/background.png
 linux:
   desktop:
     entry:

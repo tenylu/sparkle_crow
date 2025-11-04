@@ -212,7 +212,7 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
     if (file.endsWith('.exe')) {
       // For Windows .exe installer:
       // 1. Exit the app first (this releases file locks)
-      // 2. Launch installer with /S (silent) flag
+      // 2. Launch installer with GUI (no /S flag) so user can see progress
       // 3. After installation, manually start the application
       const installerPath = path.join(dataDir(), file)
       // Get current exe path to determine installation path
@@ -243,7 +243,7 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
           type: 'info',
           title: '准备安装更新',
           message: '即将退出应用并启动安装程序',
-          detail: '安装程序将在安装完成后自动重启应用。',
+          detail: '安装程序将在安装完成后自动重启应用。\n\n请完成安装程序的所有步骤，安装完成后应用会自动启动。',
           buttons: ['确定']
         }).then(() => {
           setNotQuitDialog()
@@ -289,8 +289,8 @@ if exist "${startMenuPath}" (
             app.quit()
           }).catch((err) => {
             console.error('[AutoUpdater] Failed to create restart script:', err)
-            // Fallback: just launch installer and quit
-            spawn(installerPath, ['/S'], {
+            // Fallback: just launch installer GUI and quit
+            spawn(installerPath, [], {
               detached: true,
               stdio: 'ignore',
               shell: false
@@ -337,7 +337,7 @@ if exist "${startMenuPath}" (
           app.quit()
         }).catch((err) => {
           console.error('[AutoUpdater] Failed to create restart script:', err)
-          spawn(installerPath, ['/S'], {
+          spawn(installerPath, [], {
             detached: true,
             stdio: 'ignore',
             shell: false

@@ -106,8 +106,9 @@ fi
 
 if [ -d "$APP_PATH" ]; then
     echo "Opening newly installed app: $APP_PATH" >&2
-    # Wait 2 seconds for installation to fully complete, then open the app
-    (sleep 2 && open "$APP_PATH" 2>/dev/null) &
+    # Wait 3 seconds for installation to fully complete, then open the app
+    # Use background process to avoid blocking installation
+    (sleep 3 && open "$APP_PATH" 2>/dev/null) &
 fi
 
 exit 0
