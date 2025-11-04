@@ -47,6 +47,8 @@ declare global {
       mihomo: {
         getConfig: () => Promise<any>
       }
+      onQuitConfirm: (callback: () => void) => () => void
+      sendQuitConfirmResult: (confirmed: boolean) => void
     }
   }
 }

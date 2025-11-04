@@ -36,6 +36,8 @@ interface AppState {
   setSelectedNode: (node: Node | null) => void
   nodesLoading: boolean
   setNodesLoading: (loading: boolean) => void
+  autoSelectNode: boolean
+  setAutoSelectNode: (auto: boolean) => void
   
   // Proxy mode
   proxyMode: ProxyMode
@@ -110,6 +112,15 @@ const getInitialTheme = (): AppTheme => {
   return 'auto'
 }
 
+const getInitialAutoSelect = (): boolean => {
+  try {
+    const saved = localStorage.getItem('auto_select_node')
+    return saved !== 'false' // Default to true
+  } catch {
+    return true
+  }
+}
+
 const initialState = {
   userInfo: null,
   isConnected: false,
@@ -133,7 +144,8 @@ const initialState = {
   localIP: '',
   selectedLanIP: '',
   lanIPs: [],
-  nodesLoading: false
+  nodesLoading: false,
+  autoSelectNode: getInitialAutoSelect()
 }
 
 export const useAppStore = create<AppState>((set) => {
@@ -217,6 +229,15 @@ export const useAppStore = create<AppState>((set) => {
   setLanIPs: (ips) => set({ lanIPs: ips }),
   
     setNodesLoading: (loading) => set({ nodesLoading: loading }),
+  
+    setAutoSelectNode: (auto) => {
+      try {
+        localStorage.setItem('auto_select_node', String(auto))
+      } catch {
+        // ignore
+      }
+      set({ autoSelectNode: auto })
+    },
   
     reset: () => set(initialState)
   }

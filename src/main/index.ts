@@ -730,8 +730,8 @@ app.whenReady().then(async () => {
       
       // Generate config with new node
       const minimalConfig: any = {
-        port: 7890,
-        'socks-port': 7891,
+        port: 0,
+        'socks-port': 0,
         'mixed-port': 7890,
         'allow-lan': true,
         mode: 'rule',
@@ -1142,16 +1142,30 @@ export async function createWindow(): Promise<void> {
   })
 
   mainWindow.on('close', async (event) => {
+    // If already quitting (e.g., from menu), allow close
+    if (isQuitting || notQuitDialog) {
+      return
+    }
+    
     event.preventDefault()
-    mainWindow?.hide()
-    const { autoQuitWithoutCore = false, autoQuitWithoutCoreDelay = 60 } = await getAppConfig()
-    if (autoQuitWithoutCore) {
+    
+    // Show quit confirmation dialog
+    const confirmed = await showQuitConfirmDialog()
+    
+    if (confirmed) {
+      // User confirmed, quit the application
+      isQuitting = true
+      triggerSysProxy(false, false)
+      await stopCore()
+      mainWindow?.destroy()
+      app.exit()
+    } else {
+      // User cancelled, keep window open (already prevented default)
+      // Clear any auto-quit timeout
       if (quitTimeout) {
         clearTimeout(quitTimeout)
+        quitTimeout = null
       }
-      quitTimeout = setTimeout(async () => {
-        await quitWithoutCore()
-      }, autoQuitWithoutCoreDelay * 1000)
     }
   })
 

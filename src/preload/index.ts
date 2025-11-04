@@ -61,6 +61,15 @@ const api = {
   },
   mihomo: {
     getConfig: () => ipcRenderer.invoke('getControledMihomoConfig')
+  },
+  onQuitConfirm: (callback: () => void) => {
+    ipcRenderer.on('show-quit-confirm', callback)
+    return () => {
+      ipcRenderer.removeListener('show-quit-confirm', callback)
+    }
+  },
+  sendQuitConfirmResult: (confirmed: boolean) => {
+    ipcRenderer.send('quit-confirm-result', confirmed)
   }
 }
 // Use `contextBridge` APIs to expose Electron APIs to

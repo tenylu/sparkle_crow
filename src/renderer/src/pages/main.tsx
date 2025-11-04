@@ -11,6 +11,7 @@ import { SettingsMenu } from '../components/SettingsMenu'
 import { SharedProxyModal } from '../components/SharedProxyModal'
 import { AnnouncementButton } from '../components/AnnouncementButton'
 import { AnnouncementModal } from '../components/AnnouncementModal'
+import { QuitConfirmModal } from '../components/QuitConfirmModal'
 import logoImg from '../assets/logo.png'
 
 interface MainProps {
@@ -36,6 +37,7 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
   const t = useTranslation()
   const [updateProgress, setUpdateProgress] = useState<{ downloading: boolean; progress: number } | null>(null)
   const [platform, setPlatform] = useState<NodeJS.Platform>('darwin')
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false)
 
   // Get platform info
   useEffect(() => {
@@ -68,6 +70,14 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
     return undefined
   }, [setShowUpdateModal])
 
+  // Listen for quit confirmation request
+  useEffect(() => {
+    const unsubscribe = window.api.onQuitConfirm(() => {
+      setShowQuitConfirm(true)
+    })
+    return unsubscribe
+  }, [])
+
   useEffect(() => {
     const loadUserInfo = async () => {
       try {
@@ -75,102 +85,6 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
         setUserInfo(info)
       } catch (error) {
         console.error('Failed to load user info:', error)
-      }
-    }
-
-    const loadNodes = async () => {
-      try {
-        console.log('[Main] Loading real nodes from API...')
-        const realNodes = await window.api.xboard.getNodes()
-        console.log('[Main] Got nodes:', realNodes)
-        
-        // Check if realNodes is an array
-        if (!Array.isArray(realNodes)) {
-          console.error('[Main] Invalid nodes data:', realNodes)
-          useAppStore.getState().setNodes([])
-          return
-        }
-        
-        console.log('[Main] Got nodes count:', realNodes.length)
-        
-        const { setNodes, setSelectedNode, updateNode } = useAppStore.getState()
-      
-      // Map real nodes to our interface
-      const mappedNodes = realNodes.map((node: Node) => ({
-        name: node.name || 'Unknown',
-        type: node.type || 'unknown',
-        server: node.server || '',
-        port: node.port || 0,
-        country: node.country || 'XX',
-        flag: node.flag || '🌐',
-        latency: node.latency,
-        status: node.status || 'checking'
-      }))
-      
-      setNodes(mappedNodes)
-        
-        // Auto-select first node initially
-        if (mappedNodes.length > 0) {
-          console.log('[Main] Auto-selecting first node:', mappedNodes[0].name)
-        setSelectedNode(mappedNodes[0])
-      }
-
-        // Async check latency and auto-select lowest latency node
-        let completedCount = 0
-        const totalNodes = mappedNodes.length
-        
-      mappedNodes.forEach((node, index) => {
-        setTimeout(async () => {
-          try {
-            const { ipcRenderer } = window.electron
-            const updatedNode = await ipcRenderer.invoke('check-node-latency', node)
-              updateNode(node.name, updatedNode)
-              
-              completedCount++
-              
-              // When all checks complete, select the node with lowest latency
-              if (completedCount === totalNodes) {
-                console.log('[Main] All latency checks complete, selecting lowest latency node...')
-                const currentState = useAppStore.getState()
-                const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
-                
-                if (onlineNodes.length > 0) {
-                  const sortedNodes = [...onlineNodes].sort((a, b) => {
-                    const latA = a.latency || 999999
-                    const latB = b.latency || 999999
-                    return latA - latB
-                  })
-                  
-                  const fastestNode = sortedNodes[0]
-                  console.log('[Main] Selecting fastest node:', fastestNode.name, 'latency:', fastestNode.latency)
-                  setSelectedNode(fastestNode)
-                }
-              }
-            } catch (error) {
-              completedCount++
-              updateNode(node.name, { status: 'offline' })
-              
-              // Still check if all nodes processed
-              if (completedCount === totalNodes) {
-                const currentState = useAppStore.getState()
-                const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
-                
-                if (onlineNodes.length > 0) {
-                  const sortedNodes = [...onlineNodes].sort((a, b) => {
-                    const latA = a.latency || 999999
-                    const latB = b.latency || 999999
-                    return latA - latB
-                  })
-                  
-                  const fastestNode = sortedNodes[0]
-                  setSelectedNode(fastestNode)
-                }
-              }
-            }
-          }, index * 50)
-      })
-    } catch (error) {
-      console.error('[Main] Failed to load nodes:', error)
       }
     }
 
@@ -212,7 +126,6 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
     }
 
     loadUserInfo()
-    loadNodes()
     loadLANIPs()
   }, [setUserInfo, setLocalIP, setSelectedLanIP, setLanIPs])
 
@@ -390,6 +303,20 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
             </div>
           </div>
         </div>
+
+        {/* Quit Confirmation Modal */}
+        {showQuitConfirm && (
+          <QuitConfirmModal
+            onConfirm={() => {
+              window.api.sendQuitConfirmResult(true)
+              setShowQuitConfirm(false)
+            }}
+            onCancel={() => {
+              window.api.sendQuitConfirmResult(false)
+              setShowQuitConfirm(false)
+            }}
+          />
+        )}
       </div>
     </div>
   )

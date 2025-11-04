@@ -121,7 +121,7 @@ export async function buildXboardConfig(): Promise<any> {
   // Start with TUN/DNS/ports from controledMihomoConfig
   const config: any = {
     port: 0,
-    'socks-port': 7891,
+    'socks-port': 0,
     'mixed-port': controledMihomoConfig['mixed-port'] || 7890,
     'allow-lan': controledMihomoConfig['allow-lan'] || false,
     'log-level': 'info',

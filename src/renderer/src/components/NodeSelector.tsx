@@ -15,11 +15,49 @@ export const NodeSelector: React.FC = () => {
     isConnected,
     setIsConnecting,
     nodesLoading,
-    setNodesLoading 
+    setNodesLoading,
+    autoSelectNode,
+    setAutoSelectNode
   } = useAppStore()
 
-  const handleSwitchNode = async (newNode: typeof selectedNode) => {
+  const handleSwitchNode = async (newNode: typeof selectedNode | 'auto') => {
+    if (newNode === 'auto') {
+      // Handle auto-select option
+      setAutoSelectNode(true)
+      // If auto-select is enabled, automatically select the fastest node
+      const currentState = useAppStore.getState()
+      const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
+      
+      if (onlineNodes.length > 0) {
+        const sortedNodes = [...onlineNodes].sort((a, b) => {
+          const latA = a.latency || 999999
+          const latB = b.latency || 999999
+          return latA - latB
+        })
+        
+        const fastestNode = sortedNodes[0]
+        if (!isConnected) {
+          setSelectedNode(fastestNode)
+        } else {
+          setIsConnecting(true)
+          try {
+            await window.api.xboard.switchNode(fastestNode.name)
+            setSelectedNode(fastestNode)
+          } catch (error: any) {
+            console.error('Failed to switch node:', error)
+            alert(error.message || t('switchNodeFailed'))
+          } finally {
+            setIsConnecting(false)
+          }
+        }
+      }
+      return
+    }
+
     if (!newNode) return
+
+    // Disable auto-select when manually selecting a node
+    setAutoSelectNode(false)
 
     if (!isConnected) {
       // Not connected, just update selection
@@ -44,45 +82,41 @@ export const NodeSelector: React.FC = () => {
   const loadNodes = async () => {
     setNodesLoading(true)
     try {
-      console.log('[Main] Loading real nodes from API...')
+      console.log('[NodeSelector] Loading real nodes from API...')
       const realNodes = await window.api.xboard.getNodes()
-      console.log('[Main] Got nodes:', realNodes)
+      console.log('[NodeSelector] Got nodes:', realNodes)
       
       // Check if realNodes is an array
       if (!Array.isArray(realNodes)) {
-        console.error('[Main] Invalid nodes data:', realNodes)
+        console.error('[NodeSelector] Invalid nodes data:', realNodes)
         setNodes([])
         return
       }
       
-      console.log('[Main] Got nodes count:', realNodes.length)
+      console.log('[NodeSelector] Got nodes count:', realNodes.length)
       
-      // Map real nodes to our interface
-      const mappedNodes = realNodes.map((node: any) => ({
-        name: node.name || 'Unknown',
-        type: node.type || 'unknown',
-        server: node.server || '',
-        port: node.port || 0,
-        country: node.country || 'XX',
-        flag: node.flag || '🌐',
-        latency: node.latency,
-        status: node.status || 'checking'
-      }))
+      // Map real nodes to our interface and filter out Shadowsocks nodes
+      const mappedNodes = realNodes
+        .map((node: any) => ({
+          name: node.name || 'Unknown',
+          type: node.type || 'unknown',
+          server: node.server || '',
+          port: node.port || 0,
+          country: node.country || 'XX',
+          flag: node.flag || '🌐',
+          latency: node.latency,
+          status: node.status || 'checking'
+        }))
+        .filter((node: any) => {
+          // Hide Shadowsocks nodes
+          const nodeType = (node.type || '').toLowerCase()
+          return nodeType !== 'shadowsocks' && nodeType !== 'ss'
+        })
       
-      console.log('[Main] Mapped nodes:', mappedNodes.length, mappedNodes)
+      console.log('[NodeSelector] Mapped nodes (after filtering Shadowsocks):', mappedNodes.length, mappedNodes)
       setNodes(mappedNodes)
-      
-      // Auto-select first node initially
-      if (mappedNodes.length > 0) {
-        console.log('[Main] Auto-selecting first node initially:', mappedNodes[0])
-        setSelectedNode(mappedNodes[0])
-      }
-      
-      // Verify nodes were set
-      const verifyState = useAppStore.getState()
-      console.log('[Main] Verify nodes after set:', verifyState.nodes.length, verifyState.nodes)
 
-      // Async check latency and auto-select lowest latency node when all checks complete
+      // Async check latency for all nodes
       let completedCount = 0
       const totalNodes = mappedNodes.length
       
@@ -94,61 +128,97 @@ export const NodeSelector: React.FC = () => {
             updateNode(node.name, updatedNode)
             
             completedCount++
-            console.log(`[Main] Completed ${completedCount}/${totalNodes} latency checks`)
+            console.log(`[NodeSelector] Completed ${completedCount}/${totalNodes} latency checks`)
             
-            // When all checks complete, select the node with lowest latency
+            // When all checks complete, if auto-select is enabled, select the node with lowest latency
             if (completedCount === totalNodes) {
-              console.log('[Main] All latency checks complete, selecting lowest latency node...')
+              console.log('[NodeSelector] All latency checks complete')
               const currentState = useAppStore.getState()
-              const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
               
-              if (onlineNodes.length > 0) {
-                // Sort by latency and select the fastest
-                const sortedNodes = [...onlineNodes].sort((a, b) => {
-                  const latA = a.latency || 999999
-                  const latB = b.latency || 999999
-                  return latA - latB
-                })
+              // Only auto-select if autoSelectNode is enabled
+              if (currentState.autoSelectNode) {
+                const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
                 
-                const fastestNode = sortedNodes[0]
-                console.log('[Main] Selecting fastest node:', fastestNode.name, 'latency:', fastestNode.latency)
-                setSelectedNode(fastestNode)
+                if (onlineNodes.length > 0) {
+                  // Sort by latency and select the fastest
+                  const sortedNodes = [...onlineNodes].sort((a, b) => {
+                    const latA = a.latency || 999999
+                    const latB = b.latency || 999999
+                    return latA - latB
+                  })
+                  
+                  const fastestNode = sortedNodes[0]
+                  console.log('[NodeSelector] Auto-selecting fastest node:', fastestNode.name, 'latency:', fastestNode.latency)
+                  setSelectedNode(fastestNode)
+                } else {
+                  console.log('[NodeSelector] No online nodes found, keeping current selection')
+                }
               } else {
-                console.log('[Main] No online nodes found, keeping current selection')
+                console.log('[NodeSelector] Auto-select is disabled, keeping current selection')
               }
             }
           } catch (error) {
             completedCount++
             updateNode(node.name, { status: 'offline' })
-            console.log(`[Main] Completed ${completedCount}/${totalNodes} (node failed)`)
+            console.log(`[NodeSelector] Completed ${completedCount}/${totalNodes} (node failed)`)
             
             // Still check if all nodes processed
             if (completedCount === totalNodes) {
-              console.log('[Main] All latency checks complete (with failures)')
+              console.log('[NodeSelector] All latency checks complete (with failures)')
               const currentState = useAppStore.getState()
-              const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
               
-              if (onlineNodes.length > 0) {
-                const sortedNodes = [...onlineNodes].sort((a, b) => {
-                  const latA = a.latency || 999999
-                  const latB = b.latency || 999999
-                  return latA - latB
-                })
+              // Only auto-select if autoSelectNode is enabled
+              if (currentState.autoSelectNode) {
+                const onlineNodes = currentState.nodes.filter(n => n.status === 'online' && n.latency !== undefined)
                 
-                const fastestNode = sortedNodes[0]
-                console.log('[Main] Selecting fastest node:', fastestNode.name, 'latency:', fastestNode.latency)
-                setSelectedNode(fastestNode)
+                if (onlineNodes.length > 0) {
+                  const sortedNodes = [...onlineNodes].sort((a, b) => {
+                    const latA = a.latency || 999999
+                    const latB = b.latency || 999999
+                    return latA - latB
+                  })
+                  
+                  const fastestNode = sortedNodes[0]
+                  console.log('[NodeSelector] Auto-selecting fastest node:', fastestNode.name, 'latency:', fastestNode.latency)
+                  setSelectedNode(fastestNode)
+                }
               }
             }
           }
         }, index * 50)
       })
     } catch (error) {
-      console.error('[Main] Failed to load nodes:', error)
+      console.error('[NodeSelector] Failed to load nodes:', error)
     } finally {
       setNodesLoading(false)
     }
   }
+
+  // Load nodes on component mount and when window becomes visible
+  React.useEffect(() => {
+    // Ensure auto-select is enabled by default when program opens
+    // Only override if user has explicitly disabled it (saved as 'false' in localStorage)
+    if (!localStorage.getItem('auto_select_node')) {
+      // No saved preference, default to auto-select
+      setAutoSelectNode(true)
+    }
+    
+    // Load nodes on mount
+    loadNodes()
+    
+    // Also reload when window becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        loadNodes()
+      }
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   return (
     <>
@@ -158,7 +228,21 @@ export const NodeSelector: React.FC = () => {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            {selectedNode ? (
+            {autoSelectNode ? (
+              <>
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{t('selectedServer')}</p>
+                  <p className="text-lg font-bold text-gray-800 dark:text-white">
+                    {selectedNode ? `${selectedNode.name} (自动)` : '自动选择'}
+                  </p>
+                </div>
+              </>
+            ) : selectedNode ? (
               <>
                 <span 
                   className="fi fis text-4xl rounded-full overflow-hidden border-2 border-white dark:border-gray-700 shadow-md" 
@@ -230,7 +314,35 @@ export const NodeSelector: React.FC = () => {
               ) : !Array.isArray(nodes) || nodes.length === 0 ? (
                 <div className="p-12 text-center text-gray-500 dark:text-gray-400">{t('noAvailableNodes')}</div>
               ) : (
-                nodes.map((node, index) => (
+                <>
+                  {/* Auto-select option */}
+                  <button
+                    onClick={() => {
+                      handleSwitchNode('auto')
+                      setShowNodeList(false)
+                    }}
+                    className={`w-full p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left border-b border-gray-100 dark:border-gray-700 ${
+                      autoSelectNode ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    }`}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-800 dark:text-white">自动选择</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">自动选择延迟最低的节点</p>
+                      </div>
+                    </div>
+                    {autoSelectNode && (
+                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    )}
+                  </button>
+                  
+                  {/* Node list */}
+                  {nodes.map((node, index) => (
                   <button
                     key={index}
                     onClick={() => {
@@ -280,7 +392,8 @@ export const NodeSelector: React.FC = () => {
                       </div>
                     )}
                   </button>
-                ))
+                  ))}
+                </>
               )}
             </div>
           </div>

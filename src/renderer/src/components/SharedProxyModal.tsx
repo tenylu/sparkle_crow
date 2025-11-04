@@ -13,7 +13,6 @@ export const SharedProxyModal: React.FC = () => {
   } = useAppStore()
 
   const [httpPort, setHttpPort] = useState('7890')
-  const [socksPort, setSocksPort] = useState('7891')
   const [allowLan, setAllowLan] = useState(false)
 
   // Load port configuration when modal opens
@@ -24,11 +23,10 @@ export const SharedProxyModal: React.FC = () => {
           const config = await window.api.mihomo.getConfig()
           if (config) {
             const mixedPort = config['mixed-port'] || 7890
-            const socks = config['socks-port'] || 7891
             const allowLanEnabled = config['allow-lan'] || false
             
+            // Use mixed-port for both HTTP and SOCKS5 (mixed-port supports both)
             setHttpPort(mixedPort.toString())
-            setSocksPort(socks.toString())
             setAllowLan(allowLanEnabled)
           }
         } catch (error) {
@@ -90,13 +88,13 @@ export const SharedProxyModal: React.FC = () => {
                 </code>
               </div>
 
-              {/* SOCKS5 Proxy */}
+              {/* SOCKS5 Proxy - uses same port as HTTP (mixed-port supports both) */}
               <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">SOCKS5代理:</span>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(`socks5://${selectedLanIP}:${socksPort}`)
+                      navigator.clipboard.writeText(`socks5://${selectedLanIP}:${httpPort}`)
                       alert('已复制到剪贴板')
                     }}
                     className="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
@@ -105,7 +103,7 @@ export const SharedProxyModal: React.FC = () => {
                   </button>
                 </div>
                 <code className="text-sm text-gray-700 dark:text-gray-300 break-all">
-                  socks5://{selectedLanIP}:{socksPort}
+                  socks5://{selectedLanIP}:{httpPort}
                 </code>
               </div>
               

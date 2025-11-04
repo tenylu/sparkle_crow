@@ -20,26 +20,54 @@ let subStoreBackendWorker: Worker
 
 const defaultPacScript = `
 function FindProxyForURL(url, host) {
-  return "PROXY 127.0.0.1:%mixed-port%; SOCKS5 127.0.0.1:%mixed-port%; DIRECT;";
+  return "PROXY 127.0.0.1:%mixed-port%; DIRECT;";
 }
 `
 
-export function findAvailablePort(startPort: number): Promise<number> {
-  return new Promise((resolve, reject) => {
+/**
+ * Check if a port is available
+ */
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const server = net.createServer()
-    server.on('error', (err) => {
-      if (startPort <= 65535) {
-        resolve(findAvailablePort(startPort + 1))
-      } else {
-        reject(err)
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(port, '127.0.0.1')
+  })
+}
+
+/**
+ * Find an available port starting from startPort, only if startPort is not available
+ */
+export async function findAvailablePort(startPort: number): Promise<number> {
+  const available = await isPortAvailable(startPort)
+  if (available) {
+    return startPort
+  }
+  
+  // Only search for new port if the requested port is not available
+  return new Promise((resolve, reject) => {
+    let currentPort = startPort + 1
+    const tryNextPort = () => {
+      if (currentPort > 65535) {
+        reject(new Error(`No available port found starting from ${startPort}`))
+        return
       }
-    })
-    server.on('listening', () => {
-      server.close(() => {
-        resolve(startPort)
+      const server = net.createServer()
+      server.on('error', () => {
+        currentPort++
+        tryNextPort()
       })
-    })
-    server.listen(startPort, '127.0.0.1')
+      server.on('listening', () => {
+        server.close(() => {
+          resolve(currentPort)
+        })
+      })
+      server.listen(currentPort, '127.0.0.1')
+    }
+    tryNextPort()
   })
 }
 
@@ -56,6 +84,7 @@ export async function startPacServer(): Promise<void> {
   let script = pacScript || defaultPacScript
   const { 'mixed-port': port = 7890 } = await getControledMihomoConfig()
   script = script.replaceAll('%mixed-port%', port.toString())
+  // Try to use fixed port 10000, only find new port if it's occupied
   pacPort = await findAvailablePort(10000)
   pacServer = http
     .createServer(async (_req, res) => {
@@ -75,6 +104,7 @@ export async function startSubStoreFrontendServer(): Promise<void> {
   const { useSubStore = true, subStoreHost = '127.0.0.1' } = await getAppConfig()
   if (!useSubStore) return
   await stopSubStoreFrontendServer()
+  // Try to use fixed port 14122, only find new port if it's occupied
   subStoreFrontendPort = await findAvailablePort(14122)
   const app = express()
   app.use(express.static(path.join(mihomoWorkDir(), 'sub-store-frontend')))
@@ -101,6 +131,7 @@ export async function startSubStoreBackendServer(): Promise<void> {
   if (!useSubStore) return
   if (!useCustomSubStore) {
     await stopSubStoreBackendServer()
+    // Try to use fixed port 38324, only find new port if it's occupied
     subStorePort = await findAvailablePort(38324)
     const icon = nativeImage.createFromPath(subStoreIcon)
     icon.toDataURL()
