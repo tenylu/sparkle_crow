@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../hooks/useTranslation'
 
@@ -20,6 +20,20 @@ export const SettingsMenu: React.FC = () => {
     setTheme
   } = useAppStore()
   const t = useTranslation()
+  const [version, setVersion] = useState<string>('')
+
+  // Get version on mount
+  useEffect(() => {
+    const getVersion = async () => {
+      try {
+        const v = await window.api.getVersion()
+        setVersion(v)
+      } catch (err) {
+        console.error('Failed to get version:', err)
+      }
+    }
+    getVersion()
+  }, [])
 
   // Auto-check for updates on mount
   useEffect(() => {
@@ -104,17 +118,22 @@ export const SettingsMenu: React.FC = () => {
             </button>
             <button
               onClick={handleCheckUpdate}
-              className="w-full px-4 py-3 flex items-center space-x-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors relative"
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors relative"
             >
-              <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span className="text-sm text-gray-800 dark:text-gray-200 flex items-center">
-                {t('checkUpdate')}
-                {hasUpdateAvailable && (
-                  <span className="ml-2 w-2 h-2 bg-red-500 rounded-full"></span>
-                )}
-              </span>
+              <div className="flex items-center space-x-3">
+                <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="text-sm text-gray-800 dark:text-gray-200 flex items-center">
+                  {t('checkUpdate')}
+                  {hasUpdateAvailable && (
+                    <span className="ml-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                  )}
+                </span>
+              </div>
+              {version && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">{version}</span>
+              )}
             </button>
             
             {/* Language Switcher */}

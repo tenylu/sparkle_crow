@@ -14,33 +14,60 @@ import { disableSysProxy } from '../sys/sysproxy'
 let downloadCancelToken: CancelTokenSource | null = null
 
 export async function checkUpdate(): Promise<AppVersion | undefined> {
-  const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
-  const { updateChannel = 'stable' } = await getAppConfig()
-  
-  // Cloudflare R2 URL
-  const baseUrl = 'https://cloud.crowmesh.com'
-  let url = `${baseUrl}/latest.yml`
-  if (updateChannel == 'beta') {
-    url = `${baseUrl}/latest-beta.yml`
-  }
-  
-  const res = await axios.get(url, {
-    headers: { 'Content-Type': 'application/octet-stream' },
-    ...(mixedPort != 0 && {
-      proxy: {
-        protocol: 'http',
-        host: '127.0.0.1',
-        port: mixedPort
-      }
-    }),
-    validateStatus: () => true,
-    responseType: 'text'
-  })
-  const latest = parseYaml<AppVersion>(res.data)
-  const currentVersion = app.getVersion()
-  if (latest.version !== currentVersion) {
-    return latest
-  } else {
+  try {
+    const { 'mixed-port': mixedPort = 7890 } = await getControledMihomoConfig()
+    const { updateChannel = 'stable' } = await getAppConfig()
+    
+    // Cloudflare R2 URL
+    const baseUrl = 'https://cloud.crowmesh.com'
+    let url = `${baseUrl}/latest.yml`
+    if (updateChannel == 'beta') {
+      url = `${baseUrl}/latest-beta.yml`
+    }
+    
+    const res = await axios.get(url, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      ...(mixedPort != 0 && {
+        proxy: {
+          protocol: 'http',
+          host: '127.0.0.1',
+          port: mixedPort
+        }
+      }),
+      validateStatus: () => true,
+      responseType: 'text',
+      timeout: 10000
+    })
+    
+    // Check if request was successful
+    if (res.status !== 200 || !res.data) {
+      console.error('[AutoUpdater] Failed to fetch update info:', res.status, res.statusText)
+      return undefined
+    }
+    
+    // Parse YAML
+    let latest: AppVersion
+    try {
+      latest = parseYaml<AppVersion>(res.data)
+    } catch (parseError) {
+      console.error('[AutoUpdater] Failed to parse update info YAML:', parseError)
+      return undefined
+    }
+    
+    // Validate version format
+    if (!latest || !latest.version || typeof latest.version !== 'string') {
+      console.error('[AutoUpdater] Invalid update info format:', latest)
+      return undefined
+    }
+    
+    const currentVersion = app.getVersion()
+    if (latest.version !== currentVersion) {
+      return latest
+    } else {
+      return undefined
+    }
+  } catch (error: any) {
+    console.error('[AutoUpdater] Error checking for updates:', error.message)
     return undefined
   }
 }
