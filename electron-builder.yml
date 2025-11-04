@@ -41,12 +41,8 @@ nsis:
   runAfterFinish: true
 mac:
   target:
-    - target: zip
-      arch:
-        - arm64
-    - target: pkg
-      arch:
-        - arm64
+    - zip
+    - pkg
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
