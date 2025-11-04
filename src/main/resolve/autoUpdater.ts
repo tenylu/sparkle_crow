@@ -1,6 +1,6 @@
 import axios, { AxiosRequestConfig, CancelTokenSource } from 'axios'
 import { parseYaml } from '../utils/yaml'
-import { app, shell } from 'electron'
+import { app, shell, dialog } from 'electron'
 import { getAppConfig, getControledMihomoConfig } from '../config'
 import { dataDir, exeDir, exePath, isPortable, resourcesFilesDir } from '../utils/dirs'
 import { copyFile, rm, writeFile, readFile } from 'fs/promises'
@@ -165,42 +165,82 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
 
     disableSysProxy(false)
     if (file.endsWith('.exe')) {
-      spawn(path.join(dataDir(), file), ['/S', '--force-run'], {
-        detached: true,
-        stdio: 'ignore'
-      }).unref()
-    }
-    if (file.endsWith('.7z')) {
+      // For Windows .exe installer:
+      // 1. Exit the app first (this releases file locks)
+      // 2. Launch installer with /S (silent) and /R (run after install) flags
+      // 3. Installer will automatically restart the app after installation
+      const installerPath = path.join(dataDir(), file)
+      setNotQuitDialog()
+      app.quit()
+      
+      // Wait for app to quit, then launch installer
+      setTimeout(() => {
+        spawn(installerPath, ['/S', '/R'], {
+          detached: true,
+          stdio: 'ignore',
+          shell: false
+        }).unref()
+      }, 1000)
+    } else if (file.endsWith('.7z')) {
+      // For portable Windows .7z:
+      // 1. Extract files
+      // 2. Quit app
+      // 3. Restart app
       await copyFile(path.join(resourcesFilesDir(), '7za.exe'), path.join(dataDir(), '7za.exe'))
+      setNotQuitDialog()
+      
+      // Extract and restart in one command
       spawn(
         'cmd',
         [
           '/C',
-          `"timeout /t 2 /nobreak >nul && "${path.join(dataDir(), '7za.exe')}" x -o"${exeDir()}" -y "${path.join(dataDir(), file)}" & start "" "${exePath()}""`
+          `"timeout /t 2 /nobreak >nul && "${path.join(dataDir(), '7za.exe')}" x -o"${exeDir()}" -y "${path.join(dataDir(), file)}" && timeout /t 1 /nobreak >nul && start "" "${exePath()}""`
         ],
         {
           shell: true,
-          detached: true
+          detached: true,
+          stdio: 'ignore'
         }
       ).unref()
-      setNotQuitDialog()
+      
       app.quit()
-    }
-    if (file.endsWith('.pkg')) {
-      try {
-        const pkgPath = path.join(dataDir(), file)
-        
-        // Use open command to launch the pkg installer
-        // This will use the system installer which already has proper branding
+    } else if (file.endsWith('.pkg')) {
+      // For macOS .pkg installer:
+      // 1. Show message to user that installation will start
+      // 2. Quit app
+      // 3. Launch installer
+      // Note: User must manually complete installation and restart app
+      const pkgPath = path.join(dataDir(), file)
+      
+      // Show dialog to inform user
+      if (mainWindow) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '准备安装更新',
+          message: '即将退出应用并启动安装程序',
+          detail: '安装完成后，请手动重新打开应用。',
+          buttons: ['确定']
+        }).then(() => {
+          setNotQuitDialog()
+          app.quit()
+          
+          // Wait for app to quit, then open installer
+          setTimeout(() => {
+            shell.openPath(pkgPath).catch((err) => {
+              console.error('[AutoUpdater] Failed to open installer:', err)
+            })
+          }, 1000)
+        })
+      } else {
+        // If no main window, just quit and open installer
         setNotQuitDialog()
         app.quit()
         
-        // Wait a bit for the app to quit, then open the installer
         setTimeout(() => {
-          shell.openPath(pkgPath)
-        }, 500)
-      } catch {
-        shell.openPath(path.join(dataDir(), file))
+          shell.openPath(pkgPath).catch((err) => {
+            console.error('[AutoUpdater] Failed to open installer:', err)
+          })
+        }, 1000)
       }
     }
   } catch (e) {
