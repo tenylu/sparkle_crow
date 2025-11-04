@@ -56,11 +56,19 @@ jobs:
           GIT_COMMIT_HASH=$(git rev-parse --short HEAD)
           VERSION=$(jq -r '.version' package.json)
 
-          if [ "${{ github.event.inputs.version }}" == "" ]; then
-            BASE_VERSION=$(echo $VERSION | awk -F. '{print $1"."$2"."$3+1}')
-            VERSION_PREFIX=${VERSION_PREFIX:-beta}
-            RELEASE_VERSION="${BASE_VERSION}-${VERSION_PREFIX}-${GIT_COMMIT_HASH}"
-          else
+          # Check if triggered by tag push
+          if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/v ]]; then
+            # Extract version from tag (e.g., v2.0.3 -> 2.0.3)
+            CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+            CLEAN_VERSION=$(echo "$CURRENT_TAG" | sed 's/^v//')
+            if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid version format in tag: $CURRENT_TAG"
+              exit 1
+            fi
+            RELEASE_VERSION="$CLEAN_VERSION"
+            echo "Building release version from tag: $RELEASE_VERSION"
+          elif [ "${{ github.event.inputs.version }}" != "" ]; then
+            # workflow_dispatch with version input
             INPUT_VERSION="${{ github.event.inputs.version }}"
             CLEAN_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
             if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -68,6 +76,13 @@ jobs:
               exit 1
             fi
             RELEASE_VERSION="$CLEAN_VERSION"
+            echo "Building release version from input: $RELEASE_VERSION"
+          else
+            # Push to master branch - build beta version
+            BASE_VERSION=$(echo $VERSION | awk -F. '{print $1"."$2"."$3+1}')
+            VERSION_PREFIX=${VERSION_PREFIX:-beta}
+            RELEASE_VERSION="${BASE_VERSION}-${VERSION_PREFIX}-${GIT_COMMIT_HASH}"
+            echo "Building beta version: $RELEASE_VERSION"
           fi
 
           jq --arg version "$RELEASE_VERSION" '.version = $version' package.json > tmp.json && mv tmp.json package.json
