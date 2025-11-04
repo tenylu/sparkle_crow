@@ -174,10 +174,14 @@ export async function createTray(): Promise<void> {
       image.setTemplateImage(true)
       tray?.setImage(image)
     })
+    // Set context menu for macOS (required for menu to show)
+    const menu = await buildContextMenu()
+    tray?.setContextMenu(menu)
     tray?.addListener('right-click', async () => {
       triggerMainWindow()
     })
-    tray?.addListener('click', async () => {
+    tray?.addListener('click', async (event, bounds) => {
+      // On macOS, click event should show context menu
       await updateTrayMenu()
     })
   }
@@ -201,9 +205,15 @@ export async function createTray(): Promise<void> {
 
 async function updateTrayMenu(): Promise<void> {
   const menu = await buildContextMenu()
-  tray?.popUpContextMenu(menu) // 弹出菜单
-  if (process.platform === 'linux') {
+  if (process.platform === 'darwin') {
+    // On macOS, set context menu and pop it up
     tray?.setContextMenu(menu)
+    tray?.popUpContextMenu()
+  } else if (process.platform === 'linux') {
+    tray?.setContextMenu(menu)
+  } else {
+    // Windows
+    tray?.popUpContextMenu(menu)
   }
 }
 

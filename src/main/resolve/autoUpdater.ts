@@ -46,26 +46,52 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     }
     
     // Parse YAML
-    let latest: AppVersion
+    let latestVersionInfo: AppVersion
     try {
-      latest = parseYaml<AppVersion>(res.data)
+      latestVersionInfo = parseYaml<AppVersion>(res.data)
     } catch (parseError) {
       console.error('[AutoUpdater] Failed to parse update info YAML:', parseError)
       return undefined
     }
     
     // Validate version format
-    if (!latest || !latest.version || typeof latest.version !== 'string') {
-      console.error('[AutoUpdater] Invalid update info format:', latest)
+    if (!latestVersionInfo || !latestVersionInfo.version || typeof latestVersionInfo.version !== 'string') {
+      console.error('[AutoUpdater] Invalid update info format:', latestVersionInfo)
       return undefined
     }
     
     const currentVersion = app.getVersion()
-    if (latest.version !== currentVersion) {
-      return latest
-    } else {
+    
+    // Compare versions using semver-like logic
+    // Only return update if latest version is newer than current version
+    if (latestVersionInfo.version === currentVersion) {
       return undefined
     }
+    
+    // Parse version strings (e.g., "2.0.4" -> [2, 0, 4])
+    const parseVersion = (version: string): number[] => {
+      return version.split('.').map(Number)
+    }
+    
+    const currentParts = parseVersion(currentVersion)
+    const latestParts = parseVersion(latestVersionInfo.version)
+    
+    // Compare version arrays
+    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+      const currentPart = currentParts[i] || 0
+      const latestPart = latestParts[i] || 0
+      
+      if (latestPart > currentPart) {
+        // Latest version is newer, return update info
+        return latestVersionInfo
+      } else if (latestPart < currentPart) {
+        // Latest version is older, don't update
+        return undefined
+      }
+    }
+    
+    // Versions are equal (shouldn't happen due to first check, but just in case)
+    return undefined
   } catch (error: any) {
     console.error('[AutoUpdater] Error checking for updates:', error.message)
     return undefined
