@@ -5,6 +5,7 @@ import { exec, execFile } from 'child_process'
 import { sysproxyPath } from '../utils/dirs'
 import { net } from 'electron'
 import axios from 'axios'
+import { existsSync } from 'fs'
 
 let defaultBypass: string[]
 let triggerSysProxyTimer: NodeJS.Timeout | null = null
@@ -77,17 +78,28 @@ async function setSysProxy(onlyActiveDevice: boolean): Promise<void> {
   switch (mode || 'manual') {
     case 'auto': {
       if (process.platform === 'darwin') {
-        await axios.post(
-          'http://localhost/pac',
-          {
-            url: `http://${host || '127.0.0.1'}:${pacPort}/pac`,
-            only_active_device: onlyActiveDevice
-          },
-          {
-            socketPath: helperSocketPath,
-            validateStatus: () => true
+        try {
+          // Check if helper socket exists before attempting connection
+          if (!existsSync(helperSocketPath)) {
+            console.warn('[SysProxy] Helper socket not found, skipping system proxy setup')
+            return
           }
-        )
+          await axios.post(
+            'http://localhost/pac',
+            {
+              url: `http://${host || '127.0.0.1'}:${pacPort}/pac`,
+              only_active_device: onlyActiveDevice
+            },
+            {
+              socketPath: helperSocketPath,
+              validateStatus: () => true,
+              timeout: 5000
+            }
+          )
+        } catch (error: any) {
+          console.warn('[SysProxy] Failed to set PAC proxy via helper:', error.message)
+          // Continue execution - don't throw error
+        }
       } else {
         await execFilePromise(sysproxyPath(), [
           'pac',
@@ -101,18 +113,29 @@ async function setSysProxy(onlyActiveDevice: boolean): Promise<void> {
     case 'manual': {
       if (port != 0) {
         if (process.platform === 'darwin') {
-          await axios.post(
-            'http://localhost/proxy',
-            {
-              server: `${host || '127.0.0.1'}:${port}`,
-              bypass: bypass.join(','),
-              only_active_device: onlyActiveDevice
-            },
-            {
-              socketPath: helperSocketPath,
-              validateStatus: () => true
+          try {
+            // Check if helper socket exists before attempting connection
+            if (!existsSync(helperSocketPath)) {
+              console.warn('[SysProxy] Helper socket not found, skipping system proxy setup')
+              return
             }
-          )
+            await axios.post(
+              'http://localhost/proxy',
+              {
+                server: `${host || '127.0.0.1'}:${port}`,
+                bypass: bypass.join(','),
+                only_active_device: onlyActiveDevice
+              },
+              {
+                socketPath: helperSocketPath,
+                validateStatus: () => true,
+                timeout: 5000
+              }
+            )
+          } catch (error: any) {
+            console.warn('[SysProxy] Failed to set manual proxy via helper:', error.message)
+            // Continue execution - don't throw error
+          }
         } else {
           await execFilePromise(sysproxyPath(), [
             'proxy',
@@ -132,14 +155,25 @@ export async function disableSysProxy(onlyActiveDevice: boolean): Promise<void> 
   await stopPacServer()
   const execFilePromise = promisify(execFile)
   if (process.platform === 'darwin') {
-    await axios.post(
-      'http://localhost/disable',
-      { only_active_device: onlyActiveDevice },
-      {
-        socketPath: helperSocketPath,
-        validateStatus: () => true
+    try {
+      // Check if helper socket exists before attempting connection
+      if (!existsSync(helperSocketPath)) {
+        console.warn('[SysProxy] Helper socket not found, skipping system proxy disable')
+        return
       }
-    )
+      await axios.post(
+        'http://localhost/disable',
+        { only_active_device: onlyActiveDevice },
+        {
+          socketPath: helperSocketPath,
+          validateStatus: () => true,
+          timeout: 5000
+        }
+      )
+    } catch (error: any) {
+      console.warn('[SysProxy] Failed to disable proxy via helper:', error.message)
+      // Continue execution - don't throw error
+    }
   } else {
     await execFilePromise(sysproxyPath(), ['disable'])
   }
