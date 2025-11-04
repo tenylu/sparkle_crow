@@ -25,13 +25,7 @@ jobs:
         include:
           - os: windows-latest
             arch: x64
-            format: 7z
-          - os: windows-latest
-            arch: x64
             format: nsis
-          - os: windows-latest
-            arch: arm64
-            format: 7z
           - os: windows-latest
             arch: arm64
             format: nsis
@@ -104,26 +98,15 @@ jobs:
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             pnpm electron-vite build
-            if [[ "${{ matrix.format }}" == "nsis" ]]; then
-              pnpm electron-builder --publish never --win nsis --${{ matrix.arch }}
-            else
-              pnpm electron-builder --publish never --win 7z --${{ matrix.arch }}
-            fi
-            pnpm checksum .exe .7z
+            pnpm electron-builder --publish never --win nsis --${{ matrix.arch }}
+            pnpm checksum .exe
           else
             pnpm electron-vite build
-            pnpm electron-builder --publish never --mac --${{ matrix.arch }}
-            pnpm checksum .zip .pkg
+            pnpm electron-builder --publish never --mac pkg --${{ matrix.arch }}
+            pnpm checksum .pkg
           fi
 
-      - name: Add Portable Flag
-        if: matrix.os == 'windows-latest' && matrix.format == '7z'
-        shell: pwsh
-        run: |
-          New-Item -Path "PORTABLE" -ItemType File
-          Get-ChildItem dist/*portable.7z | ForEach-Object {
-            7z a $_.FullName PORTABLE
-          }
+
 
       - name: Create Changelog
         env:

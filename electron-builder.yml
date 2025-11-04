@@ -28,8 +28,7 @@ protocols:
 win:
   target:
     - nsis
-    - 7z
-  artifactName: ${name}-windows-${version}-${arch}-portable.${ext}
+  artifactName: ${name}-windows-${version}-${arch}-setup.${ext}
 nsis:
   artifactName: ${name}-windows-${version}-${arch}-setup.${ext}
   installerIcon: build/installerIcon.ico
@@ -41,7 +40,6 @@ nsis:
   runAfterFinish: true
 mac:
   target:
-    - zip
     - pkg
   icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
