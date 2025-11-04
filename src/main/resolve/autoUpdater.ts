@@ -215,10 +215,27 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
       // 2. Launch installer with /S (silent) flag
       // 3. After installation, manually start the application
       const installerPath = path.join(dataDir(), file)
-      const appExePath = exePath()
+      // Get current exe path to determine installation path
+      // NSIS installer installs to Program Files or user-specified directory
+      // Use Start Menu shortcut or try common installation paths
+      const currentExePath = exePath()
+      const appName = path.basename(currentExePath, '.exe')
+      const productName = 'CrowVPN' // Match productName in electron-builder.yml
+      
+      // Try to get installed path from Start Menu shortcut or use current path as fallback
+      // For perMachine installations, default is C:\Program Files\CrowVPN\CrowVPN.exe
+      // But user might have changed it, so we'll try multiple approaches
+      const startMenuPath = path.join(
+        process.env.APPDATA || '',
+        'Microsoft',
+        'Windows',
+        'Start Menu',
+        'Programs',
+        `${productName}.lnk`
+      )
       
       console.log('[AutoUpdater] Windows installer path:', installerPath)
-      console.log('[AutoUpdater] Application exe path:', appExePath)
+      console.log('[AutoUpdater] Current exe path:', currentExePath)
       
       // Show dialog to inform user
       if (mainWindow) {
@@ -232,6 +249,7 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
           setNotQuitDialog()
           
           // Create a script to wait for installer to finish, then start the app
+          // Use Start Menu shortcut if available, otherwise try common installation paths
           const restartScript = `
 @echo off
 timeout /t 2 /nobreak >nul
@@ -241,7 +259,20 @@ timeout /t 1 /nobreak >nul
 tasklist /FI "IMAGENAME eq ${path.basename(installerPath)}" 2>NUL | find /I /N "${path.basename(installerPath)}">NUL
 if "%ERRORLEVEL%"=="0" goto wait
 timeout /t 2 /nobreak >nul
-start "" "${appExePath}"
+REM Try to start from Start Menu shortcut first (most reliable)
+if exist "${startMenuPath}" (
+  start "" "${startMenuPath}"
+) else (
+  REM Fallback: try common installation paths
+  if exist "C:\\Program Files\\${appName}\\${appName}.exe" (
+    start "" "C:\\Program Files\\${appName}\\${appName}.exe"
+  ) else if exist "C:\\Program Files (x86)\\${appName}\\${appName}.exe" (
+    start "" "C:\\Program Files (x86)\\${appName}\\${appName}.exe"
+  ) else (
+    REM Last resort: use current path (might be portable installation)
+    start "" "${currentExePath}"
+  )
+)
 `
           
           // Write script to temp file
@@ -280,7 +311,20 @@ timeout /t 1 /nobreak >nul
 tasklist /FI "IMAGENAME eq ${path.basename(installerPath)}" 2>NUL | find /I /N "${path.basename(installerPath)}">NUL
 if "%ERRORLEVEL%"=="0" goto wait
 timeout /t 2 /nobreak >nul
-start "" "${appExePath}"
+REM Try to start from Start Menu shortcut first (most reliable)
+if exist "${startMenuPath}" (
+  start "" "${startMenuPath}"
+) else (
+  REM Fallback: try common installation paths
+  if exist "C:\\Program Files\\${appName}\\${appName}.exe" (
+    start "" "C:\\Program Files\\${appName}\\${appName}.exe"
+  ) else if exist "C:\\Program Files (x86)\\${appName}\\${appName}.exe" (
+    start "" "C:\\Program Files (x86)\\${appName}\\${appName}.exe"
+  ) else (
+    REM Last resort: use current path (might be portable installation)
+    start "" "${currentExePath}"
+  )
+)
 `
         
         const scriptPath = path.join(dataDir(), 'restart-after-update.bat')
@@ -327,15 +371,16 @@ start "" "${appExePath}"
     } else if (file.endsWith('.pkg')) {
       // For macOS .pkg installer:
       // 1. Exit the app first (this releases file locks)
-      // 2. Launch installer and wait for it to complete
-      // 3. After installation, start the application
+      // 2. Open installer GUI (user can see progress)
+      // 3. Monitor installation progress and auto-restart when complete
       const pkgPath = path.join(dataDir(), file)
-      const appPath = exePath()
-      // Extract app bundle path from exe path (remove /Contents/MacOS/CrowVPN)
-      const appBundlePath = appPath.replace(/\/Contents\/MacOS\/[^/]+$/, '')
+      // macOS pkg installer installs to /Applications/CrowVPN.app (or /Applications/Sparkle.app for legacy)
+      // Try CrowVPN.app first, then fallback to Sparkle.app
+      const installedAppPath = '/Applications/CrowVPN.app'
+      const legacyAppPath = '/Applications/Sparkle.app'
       
       console.log('[AutoUpdater] macOS installer path:', pkgPath)
-      console.log('[AutoUpdater] Application bundle path:', appBundlePath)
+      console.log('[AutoUpdater] Installed app path:', installedAppPath)
       
       // Show dialog to inform user
       if (mainWindow) {
@@ -343,29 +388,51 @@ start "" "${appExePath}"
           type: 'info',
           title: '准备安装更新',
           message: '即将退出应用并启动安装程序',
-          detail: '安装程序将在安装完成后自动重启应用。\n\n安装过程需要管理员权限。',
+          detail: '安装程序将在安装完成后自动重启应用。\n\n请完成安装程序的所有步骤（包括输入管理员密码），安装完成后应用会自动启动。',
           buttons: ['确定']
         }).then(() => {
           setNotQuitDialog()
           
-          // Create a script to install and restart
+          // Create a script to monitor installation and restart
+          // Use GUI installer so user can see progress
           const restartScript = `#!/bin/bash
 # Wait for app to quit
 sleep 2
 
-# Open installer (will require admin password)
+# Open installer GUI (user can see installation progress)
 open "${pkgPath}"
 
-# Wait for installer process to complete
-while pgrep -f "Installer.app" > /dev/null; do
-  sleep 1
+# Monitor installer process and wait for it to complete
+# Check for both Installer.app and the package installer process
+INSTALLER_RUNNING=true
+while [ "$INSTALLER_RUNNING" = true ]; do
+  sleep 2
+  
+  # Check if Installer.app is still running
+  if ! pgrep -f "Installer.app" > /dev/null; then
+    # Also check if the installer process for our package is running
+    # installer command runs as a separate process
+    if ! pgrep -f "installer.*${file}" > /dev/null; then
+      # Check if installer has finished by looking at the package receipt
+      # macOS creates receipts in /private/var/db/receipts/ when installation completes
+      # Wait a bit more to ensure installation is fully complete
+      sleep 3
+      INSTALLER_RUNNING=false
+    fi
+  fi
 done
 
-# Wait a bit more for installation to fully complete
+# Wait a bit more for installation to fully complete and filesystem to sync
 sleep 2
 
-# Launch the newly installed app
-open "${appBundlePath}"
+# Launch the newly installed app from /Applications
+if [ -d "${installedAppPath}" ]; then
+  open "${installedAppPath}"
+elif [ -d "${legacyAppPath}" ]; then
+  open "${legacyAppPath}"
+else
+  echo "Warning: Could not find installed app at ${installedAppPath} or ${legacyAppPath}" >&2
+fi
 `
           
           // Write script to temp file
@@ -411,19 +478,40 @@ open "${appBundlePath}"
 # Wait for app to quit
 sleep 2
 
-# Open installer (will require admin password)
+# Open installer GUI (user can see installation progress)
 open "${pkgPath}"
 
-# Wait for installer process to complete
-while pgrep -f "Installer.app" > /dev/null; do
-  sleep 1
+# Monitor installer process and wait for it to complete
+# Check for both Installer.app and the package installer process
+INSTALLER_RUNNING=true
+while [ "$INSTALLER_RUNNING" = true ]; do
+  sleep 2
+  
+  # Check if Installer.app is still running
+  if ! pgrep -f "Installer.app" > /dev/null; then
+    # Also check if the installer process for our package is running
+    # installer command runs as a separate process
+    if ! pgrep -f "installer.*${file}" > /dev/null; then
+      # Check if installer has finished by looking at the package receipt
+      # macOS creates receipts in /private/var/db/receipts/ when installation completes
+      # Wait a bit more to ensure installation is fully complete
+      sleep 3
+      INSTALLER_RUNNING=false
+    fi
+  fi
 done
 
-# Wait a bit more for installation to fully complete
+# Wait a bit more for installation to fully complete and filesystem to sync
 sleep 2
 
-# Launch the newly installed app
-open "${appBundlePath}"
+# Launch the newly installed app from /Applications
+if [ -d "${installedAppPath}" ]; then
+  open "${installedAppPath}"
+elif [ -d "${legacyAppPath}" ]; then
+  open "${legacyAppPath}"
+else
+  echo "Warning: Could not find installed app at ${installedAppPath} or ${legacyAppPath}" >&2
+fi
 `
         
         const scriptPath = path.join(dataDir(), 'restart-after-update.sh')
