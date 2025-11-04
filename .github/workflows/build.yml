@@ -175,7 +175,36 @@ jobs:
           API_URL: ${{ secrets.API_URL }}
           API_KEY: ${{ secrets.API_KEY }}
         run: |
-          TEXT=$(git log $(jq -r .version package.json)..HEAD --pretty=format:%s | grep -v '[0-9]\+\.[0-9]\+\.[0-9]\+$' | sed ':a;N;$!ba;s/\n/\\n/g')
+          # Get the current tag or version
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
+            CURRENT_TAG="${{ github.ref#refs/tags/ }}"
+            # If triggered by tag, use previous tag as start point
+            PREV_TAG=$(git tag -l "v*" | sort -V | grep -B1 "^$CURRENT_TAG$" | head -1)
+            if [ -z "$PREV_TAG" ]; then
+              # No previous tag found, use HEAD~20 as fallback
+              PREV_REF="HEAD~20"
+            else
+              PREV_REF="$PREV_TAG"
+            fi
+            # Compare from previous tag to current tag (not HEAD)
+            RANGE="${PREV_REF}..${CURRENT_TAG}"
+          else
+            # workflow_dispatch with version input
+            VERSION=$(jq -r .version package.json)
+            CURRENT_TAG="v$VERSION"
+            # Find the last tag before this version
+            PREV_TAG=$(git tag -l "v*" | sort -V | tail -1)
+            if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" == "$CURRENT_TAG" ]; then
+              # No previous tag or same tag, use HEAD~20 as fallback
+              PREV_REF="HEAD~20"
+            else
+              PREV_REF="$PREV_TAG"
+            fi
+            RANGE="${PREV_REF}..HEAD"
+          fi
+          
+          echo "Generating changelog from ${RANGE}"
+          TEXT=$(git log ${RANGE} --pretty=format:%s | grep -v '[0-9]\+\.[0-9]\+\.[0-9]\+$' | sed ':a;N;$!ba;s/\n/\\n/g')
           QUESTION="Translate into Chinese:\n"""\n$TEXT\n""""
           PAYLOAD=$(cat <<EOF
           {
