@@ -176,8 +176,8 @@ jobs:
           API_KEY: ${{ secrets.API_KEY }}
         run: |
           # Get the current tag or version
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
-            CURRENT_TAG="${{ github.ref#refs/tags/ }}"
+          if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/v ]]; then
+            CURRENT_TAG="${GITHUB_REF#refs/tags/}"
             # If triggered by tag, use previous tag as start point
             PREV_TAG=$(git tag -l "v*" | sort -V | grep -B1 "^$CURRENT_TAG$" | head -1)
             if [ -z "$PREV_TAG" ]; then
