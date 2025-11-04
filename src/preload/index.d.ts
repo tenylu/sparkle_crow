@@ -47,8 +47,28 @@ declare global {
       mihomo: {
         getConfig: () => Promise<any>
       }
+      sysproxy: {
+        isHelperInstalled: () => Promise<boolean>
+        installHelper: () => Promise<void>
+        restartHelper: () => Promise<void>
+      }
       onQuitConfirm: (callback: () => void) => () => void
-      sendQuitConfirmResult: (confirmed: boolean) => void
+      sendQuitConfirmResult: (result: 'quit' | 'cancel' | 'minimize') => void
+    }
+  }
+}
+
+      sendQuitConfirmResult: (result: 'quit' | 'cancel' | 'minimize') => void
+    }
+  }
+}
+
+      sendQuitConfirmResult: (result: 'quit' | 'cancel' | 'minimize') => void
+    }
+  }
+}
+
+      sendQuitConfirmResult: (result: 'quit' | 'cancel' | 'minimize') => void
     }
   }
 }

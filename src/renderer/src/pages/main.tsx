@@ -304,19 +304,23 @@ const Main: React.FC<MainProps> = ({ onLogout }) => {
           </div>
         </div>
 
-        {/* Quit Confirmation Modal */}
-        {showQuitConfirm && (
-          <QuitConfirmModal
-            onConfirm={() => {
-              window.api.sendQuitConfirmResult(true)
-              setShowQuitConfirm(false)
-            }}
-            onCancel={() => {
-              window.api.sendQuitConfirmResult(false)
-              setShowQuitConfirm(false)
-            }}
-          />
-        )}
+              {/* Quit Confirmation Modal */}
+      {showQuitConfirm && (
+        <QuitConfirmModal
+          onConfirm={() => {
+            window.api.sendQuitConfirmResult('quit')
+            setShowQuitConfirm(false)
+          }}
+          onCancel={() => {
+            window.api.sendQuitConfirmResult('cancel')
+            setShowQuitConfirm(false)
+          }}
+          onMinimize={() => {
+            window.api.sendQuitConfirmResult('minimize')
+            setShowQuitConfirm(false)
+          }}
+        />
+      )}
       </div>
     </div>
   )

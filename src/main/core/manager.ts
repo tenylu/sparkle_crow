@@ -81,11 +81,31 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     throw error
   }
 
-  // Check if the configured port is available, if not, find an available port
+  // Check if core is running first, and stop it if needed
+  const isRunning = await isCoreRunning()
+  if (isRunning) {
+    await stopCore()
+    // Wait for port to be released (including TIME_WAIT state)
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
+
+  // Check if the configured port is available
+  // Only switch to a new port if:
+  // 1. Port is actually in use by another process (not just TIME_WAIT)
+  // 2. It's not our own process using it
   const actualPort = configuredPort || 7890
   const isPortAvailable = await new Promise<boolean>((resolve) => {
     const testServer = net.createServer()
-    testServer.once('error', () => resolve(false))
+    testServer.once('error', (err: any) => {
+      // Check if error is EADDRINUSE (port in use) or other error
+      if (err.code === 'EADDRINUSE') {
+        // Port is in use, check if it's our own process
+        resolve(false)
+      } else {
+        // Other error, assume port is not available
+        resolve(false)
+      }
+    })
     testServer.once('listening', () => {
       testServer.close(() => resolve(true))
     })
@@ -93,19 +113,101 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   })
 
   if (!isPortAvailable) {
-    // Port is in use, find an available port
-    try {
-      const availablePort = await findAvailablePort(actualPort)
-      console.log(`[Manager] Port ${actualPort} is in use, switching to port ${availablePort}`)
-      await patchControledMihomoConfig({ 'mixed-port': availablePort })
-      await writeFile(logPath(), `[Manager]: Port ${actualPort} is in use, switched to port ${availablePort}\n`, {
-        flag: 'a'
+    // Port might be in TIME_WAIT state, wait a bit more and check again
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const isPortAvailableRetry = await new Promise<boolean>((resolve) => {
+      const testServer = net.createServer()
+      testServer.once('error', () => resolve(false))
+      testServer.once('listening', () => {
+        testServer.close(() => resolve(true))
       })
-    } catch (error) {
-      console.error('[Manager] Failed to find available port:', error)
-      await writeFile(logPath(), `[Manager]: Failed to find available port: ${error}\n`, {
-        flag: 'a'
-      })
+      testServer.listen(actualPort, '127.0.0.1')
+    })
+
+    if (!isPortAvailableRetry) {
+      // Port is still in use after waiting, check if it's another process
+      // Only switch port if it's genuinely occupied by another process
+      try {
+        // Try to check if port is used by another process (not just TIME_WAIT)
+        if (process.platform === 'darwin' || process.platform === 'linux') {
+          try {
+            const execPromise = promisify(exec)
+            const { stdout } = await execPromise(`lsof -ti:${actualPort} 2>/dev/null || true`)
+            const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+            if (pids.length > 0) {
+              // Port is used by a process, check if it's our core process
+              const corePath = mihomoCorePath(core)
+              const { stdout: processInfo } = await execPromise(`ps -p ${pids.join(',')} -o command= 2>/dev/null || true`)
+              if (processInfo.includes(corePath) || processInfo.includes('mihomo')) {
+                // It's our own process, kill it and use the same port
+                console.log(`[Manager] Port ${actualPort} is used by our own process, killing it`)
+                for (const pidStr of pids) {
+                  const pid = parseInt(pidStr)
+                  if (!isNaN(pid)) {
+                    try {
+                      process.kill(pid, 'SIGTERM')
+                    } catch {
+                      // Process might not exist
+                    }
+                  }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 1000))
+                // After killing, try to use the same port (continue with normal flow)
+              } else {
+                // Port is used by another process, switch to a new port
+                const availablePort = await findAvailablePort(actualPort)
+                console.log(`[Manager] Port ${actualPort} is in use by another process, switching to port ${availablePort}`)
+                await patchControledMihomoConfig({ 'mixed-port': availablePort })
+                await writeFile(logPath(), `[Manager]: Port ${actualPort} is in use by another process, switched to port ${availablePort}\n`, {
+                  flag: 'a'
+                })
+              }
+            } else {
+              // No process found, might be TIME_WAIT, wait more and use same port
+              console.log(`[Manager] Port ${actualPort} appears unavailable but no process found, waiting...`)
+              await new Promise((resolve) => setTimeout(resolve, 2000))
+              // Try one more time, if still unavailable, switch port
+              const finalCheck = await new Promise<boolean>((resolve) => {
+                const testServer = net.createServer()
+                testServer.once('error', () => resolve(false))
+                testServer.once('listening', () => {
+                  testServer.close(() => resolve(true))
+                })
+                testServer.listen(actualPort, '127.0.0.1')
+              })
+              if (!finalCheck) {
+                const availablePort = await findAvailablePort(actualPort)
+                console.log(`[Manager] Port ${actualPort} still unavailable after waiting, switching to port ${availablePort}`)
+                await patchControledMihomoConfig({ 'mixed-port': availablePort })
+                await writeFile(logPath(), `[Manager]: Port ${actualPort} still unavailable after waiting, switched to port ${availablePort}\n`, {
+                  flag: 'a'
+                })
+              }
+            }
+          } catch (error) {
+            // lsof/ps might not be available, just switch port
+            console.warn('[Manager] Could not check port usage, switching port:', error)
+            const availablePort = await findAvailablePort(actualPort)
+            await patchControledMihomoConfig({ 'mixed-port': availablePort })
+            await writeFile(logPath(), `[Manager]: Could not check port usage, switched to port ${availablePort}\n`, {
+              flag: 'a'
+            })
+          }
+        } else {
+          // Windows or other platform, just switch port if unavailable
+          const availablePort = await findAvailablePort(actualPort)
+          console.log(`[Manager] Port ${actualPort} is in use, switching to port ${availablePort}`)
+          await patchControledMihomoConfig({ 'mixed-port': availablePort })
+          await writeFile(logPath(), `[Manager]: Port ${actualPort} is in use, switched to port ${availablePort}\n`, {
+            flag: 'a'
+          })
+        }
+      } catch (error) {
+        console.error('[Manager] Failed to find available port:', error)
+        await writeFile(logPath(), `[Manager]: Failed to find available port: ${error}\n`, {
+          flag: 'a'
+        })
+      }
     }
   }
 
@@ -117,44 +219,114 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   const socketPath = mihomoIpcPath()
   if (existsSync(socketPath)) {
     console.log('[Manager] Found existing socket file, attempting cleanup')
-    try {
-      // Try to kill any process using the socket
+    
+    // Retry logic for socket cleanup
+    let socketCleaned = false
+    for (let retry = 0; retry < 5 && !socketCleaned; retry++) {
       try {
-        const execPromise = promisify(exec)
-        const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
-        const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
-        if (pids.length > 0) {
-          console.log(`[Manager] Found ${pids.length} process(es) using socket: ${pids.join(', ')}`)
-          for (const pidStr of pids) {
-            const pid = parseInt(pidStr)
-            if (!isNaN(pid)) {
-              try {
-                process.kill(pid, 'SIGTERM')
-                console.log(`[Manager] Sent SIGTERM to PID ${pid}`)
-              } catch {
-                // Process might not exist
+        // Try to kill any process using the socket
+        try {
+          const execPromise = promisify(exec)
+          const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+          const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+          if (pids.length > 0) {
+            console.log(`[Manager] Found ${pids.length} process(es) using socket: ${pids.join(', ')}`)
+            for (const pidStr of pids) {
+              const pid = parseInt(pidStr)
+              if (!isNaN(pid)) {
+                try {
+                  // Try SIGTERM first
+                  process.kill(pid, 'SIGTERM')
+                  console.log(`[Manager] Sent SIGTERM to PID ${pid}`)
+                } catch {
+                  // Process might not exist
+                }
               }
             }
+            // Wait for processes to terminate
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+            
+            // Check again if processes are still running
+            const { stdout: stdout2 } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+            const remainingPids = stdout2.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+            if (remainingPids.length > 0) {
+              console.log(`[Manager] Processes still using socket, sending SIGKILL: ${remainingPids.join(', ')}`)
+              for (const pidStr of remainingPids) {
+                const pid = parseInt(pidStr)
+                if (!isNaN(pid)) {
+                  try {
+                    process.kill(pid, 'SIGKILL')
+                    console.log(`[Manager] Sent SIGKILL to PID ${pid}`)
+                  } catch {
+                    // Process might not exist
+                  }
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 1000))
+            }
           }
-          await new Promise((resolve) => setTimeout(resolve, 500))
+        } catch {
+          // lsof might not be available or failed, continue anyway
         }
-      } catch {
-        // lsof might not be available or failed, continue anyway
+        
+                 // Try to remove socket file
+         try {
+           await rm(socketPath)
+           console.log('[Manager] Removed existing socket file')
+           socketCleaned = true
+           // Wait for filesystem to update
+           await new Promise((resolve) => setTimeout(resolve, 500))
+         } catch (rmErr: any) {
+           if (rmErr.code === 'ENOENT') {
+             // Socket already removed, good
+             socketCleaned = true
+           } else if (rmErr.code === 'EACCES') {
+             // Permission denied - socket might be owned by root
+             // If we killed all processes using it, the socket should be released
+             // Check if socket is still in use
+             try {
+               const execPromise = promisify(exec)
+               const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+               const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+               if (pids.length === 0) {
+                 // No process using it, socket should be released soon
+                 console.log('[Manager] Socket file is root-owned but no process using it, will be released')
+                 socketCleaned = true
+                 // Wait for filesystem to release the socket
+                 await new Promise((resolve) => setTimeout(resolve, 2000))
+               } else {
+                 console.log(`[Manager] Socket still in use by PIDs: ${pids.join(', ')}, permission denied`)
+               }
+             } catch {
+               // lsof failed, assume socket will be released
+               socketCleaned = true
+               await new Promise((resolve) => setTimeout(resolve, 2000))
+             }
+           } else {
+             console.log(`[Manager] Failed to remove socket (attempt ${retry + 1}/5):`, rmErr.message)
+             if (retry < 4) {
+               // Wait before retry
+               await new Promise((resolve) => setTimeout(resolve, 1000))
+             }
+           }
+         }
+      } catch (err) {
+        console.log(`[Manager] Socket cleanup error (attempt ${retry + 1}/5):`, err)
+        if (retry < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
       }
-      
-      // Remove socket file
-      await rm(socketPath)
-      console.log('[Manager] Removed existing socket file')
-      // Wait for filesystem to update
-      await new Promise((resolve) => setTimeout(resolve, 500))
-    } catch (err) {
-      console.log('[Manager] Failed to remove socket, may cause startup issue:', err)
+    }
+    
+    // Final check: if socket still exists after all retries, log warning
+    if (existsSync(socketPath)) {
+      console.warn('[Manager] WARNING: Socket file still exists after cleanup attempts, may cause startup issues')
     }
   }
   
-  // Only stop core if it's already running
-  const running = await isCoreRunning()
-  if (running) {
+  // Check again if core is running (might have been stopped earlier)
+  const coreStillRunning = await isCoreRunning()
+  if (coreStillRunning) {
     await stopCore()
     // Wait a bit for the socket to be released
     await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -314,7 +486,115 @@ sudo chmod +sx "${corePath}"
         (process.platform !== 'win32' && str.includes('External controller unix listen error')) ||
         (process.platform === 'win32' && str.includes('External controller pipe listen error'))
       ) {
-        reject(`控制器监听错误:\n${str}`)
+        console.error('[Manager] Socket bind error detected, attempting cleanup and retry')
+        
+        // Clean up socket and retry
+        const socketPath = mihomoIpcPath()
+        let socketCleaned = false
+        
+        // Try to clean up socket
+        for (let retry = 0; retry < 3 && !socketCleaned; retry++) {
+          try {
+            // Kill any process using the socket
+            try {
+              const execPromise = promisify(exec)
+              const { stdout } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+              const pids = stdout.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+              if (pids.length > 0) {
+                console.log(`[Manager] Found ${pids.length} process(es) using socket: ${pids.join(', ')}`)
+                for (const pidStr of pids) {
+                  const pid = parseInt(pidStr)
+                  if (!isNaN(pid)) {
+                    try {
+                      process.kill(pid, 'SIGTERM')
+                      console.log(`[Manager] Sent SIGTERM to PID ${pid}`)
+                    } catch {
+                      // Process might not exist
+                    }
+                  }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 1000))
+                
+                // Check again and use SIGKILL if needed
+                const { stdout: stdout2 } = await execPromise(`lsof -t "${socketPath}" 2>/dev/null || true`)
+                const remainingPids = stdout2.trim().split('\n').filter(pid => pid && !isNaN(parseInt(pid)))
+                if (remainingPids.length > 0) {
+                  console.log(`[Manager] Processes still using socket, sending SIGKILL: ${remainingPids.join(', ')}`)
+                  for (const pidStr of remainingPids) {
+                    const pid = parseInt(pidStr)
+                    if (!isNaN(pid)) {
+                      try {
+                        process.kill(pid, 'SIGKILL')
+                        console.log(`[Manager] Sent SIGKILL to PID ${pid}`)
+                      } catch {
+                        // Process might not exist
+                      }
+                    }
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 1000))
+                }
+              }
+            } catch {
+              // lsof might not be available
+            }
+            
+            // Try to remove socket file
+            try {
+              if (existsSync(socketPath)) {
+                await rm(socketPath)
+                console.log('[Manager] Removed socket file after bind error')
+              }
+              socketCleaned = true
+              await new Promise((resolve) => setTimeout(resolve, 500))
+            } catch (rmErr: any) {
+              if (rmErr.code === 'ENOENT') {
+                socketCleaned = true
+              } else {
+                console.log(`[Manager] Failed to remove socket (attempt ${retry + 1}/3):`, rmErr.message)
+                if (retry < 2) {
+                  await new Promise((resolve) => setTimeout(resolve, 1000))
+                }
+              }
+            }
+          } catch (err) {
+            console.log(`[Manager] Socket cleanup error (attempt ${retry + 1}/3):`, err)
+            if (retry < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 1000))
+            }
+          }
+        }
+        
+        // Stop current child process
+        if (child && !child.killed) {
+          try {
+            child.kill('SIGTERM')
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+            if (!child.killed) {
+              child.kill('SIGKILL')
+            }
+          } catch {
+            // ignore
+          }
+        }
+        
+        // Wait a bit more for everything to settle
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        
+                 // Retry starting the core
+         console.log('[Manager] Retrying core start after socket cleanup')
+         try {
+           const retryPromises = await startCore(detached)
+           // Replace the promise chain
+           Promise.all(retryPromises).then(() => {
+             resolve(retryPromises)
+           }).catch((retryErr) => {
+             reject(`控制器监听错误（重试后仍然失败）:\n${str}\n\n重试错误: ${retryErr}`)
+           })
+           return // Don't call reject, let retry handle it
+         } catch (retryErr) {
+           reject(`控制器监听错误（清理后重试失败）:\n${str}\n\n重试错误: ${retryErr}`)
+           return
+         }
       }
 
       if (process.platform === 'win32' && str.includes('updater: finished')) {

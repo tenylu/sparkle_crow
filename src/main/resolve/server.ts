@@ -76,7 +76,7 @@ let pacServer: http.Server
 export async function startPacServer(): Promise<void> {
   await stopPacServer()
   const { sysProxy } = await getAppConfig()
-  const { mode = 'manual', host: cHost, pacScript } = sysProxy
+  const { mode = 'manual', host: cHost, pacScript } = sysProxy || {}
   if (mode !== 'auto') {
     return
   }

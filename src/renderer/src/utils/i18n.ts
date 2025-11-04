@@ -87,6 +87,13 @@ export const translations = {
     windowTitleConnected: 'CrowVPN - 已连接',
     windowTitleDisconnected: 'CrowVPN - 未连接',
     
+    // Quit Confirm
+    hide: '隐藏',
+    quit: '退出',
+    cancel: '取消',
+    confirmQuit: '确认退出',
+    confirmQuitMessage: '确定要退出 CrowVPN 吗？',
+    
     // Login Page
     loginTitle: 'CrowVPN',
     loginSubtitle: '请输入账号密码登录',
@@ -222,6 +229,13 @@ export const translations = {
     windowTitleConnected: 'CrowVPN - Connected',
     windowTitleDisconnected: 'CrowVPN - Disconnected',
     
+    // Quit Confirm
+    hide: 'Hide',
+    quit: 'Quit',
+    cancel: 'Cancel',
+    confirmQuit: 'Confirm Quit',
+    confirmQuitMessage: 'Are you sure you want to quit CrowVPN?',
+    
     // Login Page
     loginTitle: 'CrowVPN',
     loginSubtitle: 'Please enter your account and password to login',
@@ -276,4 +290,3 @@ export const translations = {
 export function t(lang: Language, key: keyof typeof translations.zh): string {
   return translations[lang][key] || translations.zh[key]
 }
-

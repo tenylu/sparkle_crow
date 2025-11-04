@@ -1,16 +1,45 @@
 #!/bin/sh
 
-chown root:admin $2/Sparkle.app/Contents/Resources/sidecar/mihomo
-chown root:admin $2/Sparkle.app/Contents/Resources/sidecar/mihomo-alpha
-chmod +s $2/Sparkle.app/Contents/Resources/sidecar/mihomo
-chmod +s $2/Sparkle.app/Contents/Resources/sidecar/mihomo-alpha
+# Find the .app bundle in the installation directory
+APP_BUNDLE=""
+for app in "$2"/*.app; do
+    if [ -d "$app" ]; then
+        APP_BUNDLE="$app"
+        break
+    fi
+done
 
-NEW_SYSPROXY="$2/Sparkle.app/Contents/Resources/files/sysproxy"
+# Fallback to CrowVPN.app if not found (for development or direct install)
+if [ -z "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
+    APP_BUNDLE="$2/CrowVPN.app"
+fi
+
+# If still not found, try Sparkle.app (legacy support)
+if [ ! -d "$APP_BUNDLE" ]; then
+    APP_BUNDLE="$2/Sparkle.app"
+fi
+
+if [ ! -d "$APP_BUNDLE" ]; then
+    echo "Warning: Could not find app bundle in $2" >&2
+    exit 0
+fi
+
+echo "Found app bundle: $APP_BUNDLE" >&2
+
+chown root:admin "$APP_BUNDLE/Contents/Resources/sidecar/mihomo" 2>/dev/null || true
+chown root:admin "$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha" 2>/dev/null || true
+chmod +s "$APP_BUNDLE/Contents/Resources/sidecar/mihomo" 2>/dev/null || true
+chmod +s "$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha" 2>/dev/null || true
+
+NEW_SYSPROXY="$APP_BUNDLE/Contents/Resources/files/sysproxy"
 OLD_SYSPROXY="/Library/PrivilegedHelperTools/sparkle.helper"
 
 if [ ! -f "$NEW_SYSPROXY" ]; then
+    echo "Warning: Helper file not found at $NEW_SYSPROXY" >&2
     exit 0
 fi
+
+echo "Found helper file: $NEW_SYSPROXY" >&2
 
 NEED_UPDATE=false
 
@@ -23,10 +52,12 @@ else
 fi
 
 if [ "$NEED_UPDATE" = true ]; then
+    echo "Installing Helper..." >&2
     mkdir -p /Library/PrivilegedHelperTools
-    cp $2/Sparkle.app/Contents/Resources/files/sysproxy /Library/PrivilegedHelperTools/sparkle.helper
+    cp "$NEW_SYSPROXY" /Library/PrivilegedHelperTools/sparkle.helper
     chown root:wheel /Library/PrivilegedHelperTools/sparkle.helper
     chmod 544 /Library/PrivilegedHelperTools/sparkle.helper
+    echo "Helper installed successfully" >&2
 
     cat << EOF > /Library/LaunchDaemons/sparkle.helper.plist
 <?xml version="1.0" encoding="UTF-8"?>
@@ -59,8 +90,113 @@ EOF
 
     chown root:wheel /Library/LaunchDaemons/sparkle.helper.plist
     chmod 644 /Library/LaunchDaemons/sparkle.helper.plist
-    launchctl load /Library/LaunchDaemons/sparkle.helper.plist
-    launchctl start sparkle.helper
+    launchctl load /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    launchctl start sparkle.helper 2>/dev/null || true
+    echo "Helper daemon started" >&2
+else
+    echo "Helper already up to date" >&2
+fi
+
+exit 0
+
+        <string>sparkle.helper</string>
+        <key>MachServices</key>
+        <dict>
+                <key>sparkle.helper</key>
+                <true/>
+        </dict>
+        <key>KeepAlive</key>
+        <true/>
+        <key>Program</key>
+        <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+        <key>ProgramArguments</key>
+        <array>
+                <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+                <string>server</string>
+        </array>
+        <key>StandardErrorPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+        <key>StandardOutPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+    </dict>
+</plist>
+EOF
+
+    chown root:wheel /Library/LaunchDaemons/sparkle.helper.plist
+    chmod 644 /Library/LaunchDaemons/sparkle.helper.plist
+    launchctl load /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    launchctl start sparkle.helper 2>/dev/null || true
+    echo "Helper daemon started" >&2
+else
+    echo "Helper already up to date" >&2
+fi
+
+exit 0
+
+        <string>sparkle.helper</string>
+        <key>MachServices</key>
+        <dict>
+                <key>sparkle.helper</key>
+                <true/>
+        </dict>
+        <key>KeepAlive</key>
+        <true/>
+        <key>Program</key>
+        <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+        <key>ProgramArguments</key>
+        <array>
+                <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+                <string>server</string>
+        </array>
+        <key>StandardErrorPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+        <key>StandardOutPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+    </dict>
+</plist>
+EOF
+
+    chown root:wheel /Library/LaunchDaemons/sparkle.helper.plist
+    chmod 644 /Library/LaunchDaemons/sparkle.helper.plist
+    launchctl load /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    launchctl start sparkle.helper 2>/dev/null || true
+    echo "Helper daemon started" >&2
+else
+    echo "Helper already up to date" >&2
+fi
+
+exit 0
+
+        <string>sparkle.helper</string>
+        <key>MachServices</key>
+        <dict>
+                <key>sparkle.helper</key>
+                <true/>
+        </dict>
+        <key>KeepAlive</key>
+        <true/>
+        <key>Program</key>
+        <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+        <key>ProgramArguments</key>
+        <array>
+                <string>/Library/PrivilegedHelperTools/sparkle.helper</string>
+                <string>server</string>
+        </array>
+        <key>StandardErrorPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+        <key>StandardOutPath</key>
+        <string>/tmp/sparkle.helper.log</string>
+    </dict>
+</plist>
+EOF
+
+    chown root:wheel /Library/LaunchDaemons/sparkle.helper.plist
+    chmod 644 /Library/LaunchDaemons/sparkle.helper.plist
+    launchctl load /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    launchctl start sparkle.helper 2>/dev/null || true
+    echo "Helper daemon started" >&2
+else
+    echo "Helper already up to date" >&2
 fi
 
 exit 0

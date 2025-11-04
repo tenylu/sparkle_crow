@@ -166,37 +166,52 @@ function showWindow(): number {
   return 500
 }
 
-function showQuitConfirmDialog(): Promise<boolean> {
+type QuitConfirmResult = 'quit' | 'cancel' | 'minimize'
+
+function showQuitConfirmDialog(): Promise<QuitConfirmResult> {
   return new Promise((resolve) => {
     if (!mainWindow) {
-      resolve(true)
+      resolve('quit')
       return
     }
 
     const delay = showWindow()
     setTimeout(() => {
       mainWindow?.webContents.send('show-quit-confirm')
-      const handleQuitConfirm = (_event: Electron.IpcMainEvent, confirmed: boolean): void => {
+      const handleQuitConfirm = (_event: Electron.IpcMainEvent, result: QuitConfirmResult): void => {
         ipcMain.off('quit-confirm-result', handleQuitConfirm)
-        resolve(confirmed)
+        resolve(result)
       }
       ipcMain.once('quit-confirm-result', handleQuitConfirm)
     }, delay)
   })
 }
 
+function minimizeToBackground(): void {
+  if (mainWindow) {
+    mainWindow.hide()
+  }
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.hide()
+  }
+}
+
 app.on('before-quit', async (e) => {
   if (!isQuitting && !notQuitDialog) {
     e.preventDefault()
 
-    const confirmed = await showQuitConfirmDialog()
+    const result = await showQuitConfirmDialog()
 
-    if (confirmed) {
+    if (result === 'quit') {
       isQuitting = true
       triggerSysProxy(false, false)
       await stopCore()
       app.exit()
+    } else if (result === 'minimize') {
+      // Prevent quit and minimize instead
+      minimizeToBackground()
     }
+    // If result is 'cancel', do nothing (already prevented default)
   } else if (notQuitDialog) {
     isQuitting = true
     triggerSysProxy(false, false)
@@ -616,7 +631,58 @@ app.whenReady().then(async () => {
       if (!tunEnabled) {
         // Enable system proxy (already imported at top of file)
         console.log('[Main] Enabling system proxy')
-        await triggerSysProxy(true, false)
+        try {
+          await triggerSysProxy(true, false)
+        } catch (error: any) {
+          console.error('[Main] Failed to enable system proxy:', error.message)
+          
+          // Check if Helper is not installed (error message contains "Helper 未安装")
+          if (error.message && error.message.includes('Helper 未安装')) {
+            // Show dialog asking user to install Helper
+            if (mainWindow) {
+              const result = await dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                title: '系统代理 Helper 未安装',
+                message: '系统代理 Helper 未安装',
+                detail: '需要安装系统代理 Helper 才能设置系统代理。是否现在安装？\n\n安装过程需要管理员权限。',
+                buttons: ['安装', '取消'],
+                defaultId: 0,
+                cancelId: 1
+              })
+              
+              if (result.response === 0) {
+                // User chose to install
+                try {
+                  const { installHelper } = await import('./sys/sysproxy')
+                  await installHelper()
+                  // Wait a bit for Helper to start
+                  await new Promise(resolve => setTimeout(resolve, 2000))
+                  // Try to enable system proxy again
+                  await triggerSysProxy(true, false)
+                } catch (installError: any) {
+                  if (mainWindow) {
+                    dialog.showErrorBox(
+                      'Helper 安装失败',
+                      `无法安装系统代理 Helper：\n${installError.message || installError}\n\n请重新安装应用程序以安装 Helper。`
+                    )
+                  }
+                }
+              }
+            }
+          } else {
+            // Show error dialog to user for other errors
+            if (mainWindow) {
+              dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                title: '系统代理设置失败',
+                message: '无法设置系统代理',
+                detail: error.message || '系统代理设置失败，可能需要在系统设置中授予权限。代理连接已建立，但系统代理未启用。',
+                buttons: ['确定']
+              })
+            }
+          }
+          // Don't throw error, allow connection to continue without system proxy
+        }
       } else {
         console.log('[Main] TUN is enabled, skipping system proxy')
       }
@@ -1137,8 +1203,28 @@ export async function createWindow(): Promise<void> {
       mainWindow?.focusOnWebView()
     }
   })
-  mainWindow.webContents.on('did-fail-load', () => {
-    mainWindow?.webContents.reload()
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('[Main] Failed to load URL:', validatedURL, 'Error:', errorCode, errorDescription)
+    // Only reload for navigation errors, not for file not found errors
+    if (errorCode !== -6) { // -6 is ERR_FILE_NOT_FOUND
+      console.log('[Main] Attempting to reload...')
+      mainWindow?.webContents.reload()
+    } else {
+      dialog.showErrorBox(
+        '加载失败',
+        `无法加载应用界面。\n\n错误代码: ${errorCode}\n错误描述: ${errorDescription}\n\n请重新安装应用程序。`
+      )
+    }
+  })
+  
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Main] Render process gone:', details.reason, details.exitCode)
+    if (details.reason === 'crashed') {
+      dialog.showErrorBox(
+        '应用崩溃',
+        '应用界面进程崩溃。\n\n请重新启动应用程序。'
+      )
+    }
   })
 
   mainWindow.on('close', async (event) => {
@@ -1150,15 +1236,23 @@ export async function createWindow(): Promise<void> {
     event.preventDefault()
     
     // Show quit confirmation dialog
-    const confirmed = await showQuitConfirmDialog()
+    const result = await showQuitConfirmDialog()
     
-    if (confirmed) {
+    if (result === 'quit') {
       // User confirmed, quit the application
       isQuitting = true
       triggerSysProxy(false, false)
       await stopCore()
       mainWindow?.destroy()
       app.exit()
+    } else if (result === 'minimize') {
+      // User chose to minimize, hide window and dock icon
+      minimizeToBackground()
+      // Clear any auto-quit timeout
+      if (quitTimeout) {
+        clearTimeout(quitTimeout)
+        quitTimeout = null
+      }
     } else {
       // User cancelled, keep window open (already prevented default)
       // Clear any auto-quit timeout
@@ -1185,9 +1279,24 @@ export async function createWindow(): Promise<void> {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    console.log('[Main] Loading renderer from URL:', process.env['ELECTRON_RENDERER_URL'])
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    const rendererPath = join(__dirname, '../renderer/index.html')
+    console.log('[Main] Loading renderer from file:', rendererPath)
+    try {
+      if (!existsSync(rendererPath)) {
+        throw new Error(`Renderer file not found: ${rendererPath}`)
+      }
+      mainWindow.loadFile(rendererPath)
+    } catch (error: any) {
+      console.error('[Main] Failed to load renderer file:', error)
+      dialog.showErrorBox(
+        '文件缺失',
+        `无法找到应用界面文件。\n\n路径: ${rendererPath}\n\n请重新安装应用程序。`
+      )
+      app.quit()
+    }
   }
 }
 
@@ -1203,6 +1312,10 @@ export function showMainWindow(): void {
   if (mainWindow) {
     if (quitTimeout) {
       clearTimeout(quitTimeout)
+    }
+    // Show dock icon on macOS if it was hidden
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.show()
     }
     mainWindow.show()
     mainWindow.focusOnWebView()

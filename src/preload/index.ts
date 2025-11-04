@@ -62,14 +62,19 @@ const api = {
   mihomo: {
     getConfig: () => ipcRenderer.invoke('getControledMihomoConfig')
   },
+  sysproxy: {
+    isHelperInstalled: () => ipcRenderer.invoke('isHelperInstalled'),
+    installHelper: () => ipcRenderer.invoke('installHelper'),
+    restartHelper: () => ipcRenderer.invoke('restartHelper')
+  },
   onQuitConfirm: (callback: () => void) => {
     ipcRenderer.on('show-quit-confirm', callback)
     return () => {
       ipcRenderer.removeListener('show-quit-confirm', callback)
     }
   },
-  sendQuitConfirmResult: (confirmed: boolean) => {
-    ipcRenderer.send('quit-confirm-result', confirmed)
+  sendQuitConfirmResult: (result: 'quit' | 'cancel' | 'minimize') => {
+    ipcRenderer.send('quit-confirm-result', result)
   }
 }
 // Use `contextBridge` APIs to expose Electron APIs to

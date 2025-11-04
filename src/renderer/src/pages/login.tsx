@@ -809,11 +809,15 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       {showQuitConfirm && (
         <QuitConfirmModal
           onConfirm={() => {
-            window.api.sendQuitConfirmResult(true)
+            window.api.sendQuitConfirmResult('quit')
             setShowQuitConfirm(false)
           }}
           onCancel={() => {
-            window.api.sendQuitConfirmResult(false)
+            window.api.sendQuitConfirmResult('cancel')
+            setShowQuitConfirm(false)
+          }}
+          onMinimize={() => {
+            window.api.sendQuitConfirmResult('minimize')
             setShowQuitConfirm(false)
           }}
         />

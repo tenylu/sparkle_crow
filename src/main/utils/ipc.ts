@@ -65,7 +65,7 @@ import {
   revokeCorePermission,
   checkCorePermission
 } from '../core/manager'
-import { isHelperInstalled, restartHelper, triggerSysProxy } from '../sys/sysproxy'
+import { isHelperInstalled, restartHelper, triggerSysProxy, installHelper } from '../sys/sysproxy'
 import { checkUpdate, downloadAndInstallUpdate, cancelUpdate } from '../resolve/autoUpdater'
 import {
   checkElevateTask,
@@ -208,6 +208,7 @@ export function registerIpcMainHandlers(): void {
   )
   ipcMain.handle('restartHelper', ipcErrorWrapper(restartHelper))
   ipcMain.handle('isHelperInstalled', ipcErrorWrapper(isHelperInstalled))
+  ipcMain.handle('installHelper', ipcErrorWrapper(installHelper))
   ipcMain.handle('manualGrantCorePermition', () => ipcErrorWrapper(manualGrantCorePermition)())
   ipcMain.handle('checkCorePermission', () => ipcErrorWrapper(checkCorePermission)())
   ipcMain.handle('revokeCorePermission', () => ipcErrorWrapper(revokeCorePermission)())
@@ -309,3 +310,6 @@ export function registerIpcMainHandlers(): void {
     app.quit()
   })
 }
+
+
+

@@ -1,5 +1,5 @@
 import { app, Menu, shell, dialog } from 'electron'
-import { mainWindow } from '..'
+import { mainWindow, showMainWindow } from '..'
 import { getAppConfig } from '../config'
 import { quitWithoutCore } from '../core/manager'
 import { dataDir, logDir, mihomoCoreDir, mihomoWorkDir } from '../utils/dirs'
@@ -34,6 +34,12 @@ export async function createApplicationMenu(): Promise<void> {
         {
           label: '显示全部',
           role: 'unhide'
+        },
+        {
+          label: '显示窗口',
+          click: () => {
+            showMainWindow()
+          }
         },
         { type: 'separator' },
         {

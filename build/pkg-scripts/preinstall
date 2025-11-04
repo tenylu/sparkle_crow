@@ -1,7 +1,30 @@
 #!/bin/sh
 
+# Find the .app bundle in the installation directory
+APP_BUNDLE=""
+for app in "$2"/*.app; do
+    if [ -d "$app" ]; then
+        APP_BUNDLE="$app"
+        break
+    fi
+done
+
+# Fallback to CrowVPN.app if not found (for development or direct install)
+if [ -z "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
+    APP_BUNDLE="$2/CrowVPN.app"
+fi
+
+# If still not found, try Sparkle.app (legacy support)
+if [ ! -d "$APP_BUNDLE" ]; then
+    APP_BUNDLE="$2/Sparkle.app"
+fi
+
+if [ ! -d "$APP_BUNDLE" ]; then
+    exit 0
+fi
+
 # 检查新的 sysproxy 文件是否存在
-NEW_SYSPROXY="$2/Sparkle.app/Contents/Resources/files/sysproxy"
+NEW_SYSPROXY="$APP_BUNDLE/Contents/Resources/files/sysproxy"
 OLD_SYSPROXY="/Library/PrivilegedHelperTools/sparkle.helper"
 
 if [ ! -f "$NEW_SYSPROXY" ]; then
@@ -13,6 +36,75 @@ NEED_UPDATE=false
 if [ ! -f "$OLD_SYSPROXY" ]; then
     NEED_UPDATE=true
 else
+    if ! cmp -s "$NEW_SYSPROXY" "$OLD_SYSPROXY"; then
+        NEED_UPDATE=true
+    fi
+fi
+
+if [ "$NEED_UPDATE" = true ]; then
+    if launchctl list | grep -q "sparkle.helper"; then
+        launchctl stop sparkle.helper 2>/dev/null || true
+        launchctl unload /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    fi
+
+    for file in "/Library/LaunchDaemons/sparkle.helper.plist" \
+               "/Library/PrivilegedHelperTools/sparkle.helper" \
+               "/tmp/sparkle.helper" \
+               "/tmp/sparkle-helper.sock"; do
+        if [ -e "$file" ]; then
+            rm -f "$file"
+        fi
+    done
+fi
+
+exit 0
+
+    if ! cmp -s "$NEW_SYSPROXY" "$OLD_SYSPROXY"; then
+        NEED_UPDATE=true
+    fi
+fi
+
+if [ "$NEED_UPDATE" = true ]; then
+    if launchctl list | grep -q "sparkle.helper"; then
+        launchctl stop sparkle.helper 2>/dev/null || true
+        launchctl unload /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    fi
+
+    for file in "/Library/LaunchDaemons/sparkle.helper.plist" \
+               "/Library/PrivilegedHelperTools/sparkle.helper" \
+               "/tmp/sparkle.helper" \
+               "/tmp/sparkle-helper.sock"; do
+        if [ -e "$file" ]; then
+            rm -f "$file"
+        fi
+    done
+fi
+
+exit 0
+
+    if ! cmp -s "$NEW_SYSPROXY" "$OLD_SYSPROXY"; then
+        NEED_UPDATE=true
+    fi
+fi
+
+if [ "$NEED_UPDATE" = true ]; then
+    if launchctl list | grep -q "sparkle.helper"; then
+        launchctl stop sparkle.helper 2>/dev/null || true
+        launchctl unload /Library/LaunchDaemons/sparkle.helper.plist 2>/dev/null || true
+    fi
+
+    for file in "/Library/LaunchDaemons/sparkle.helper.plist" \
+               "/Library/PrivilegedHelperTools/sparkle.helper" \
+               "/tmp/sparkle.helper" \
+               "/tmp/sparkle-helper.sock"; do
+        if [ -e "$file" ]; then
+            rm -f "$file"
+        fi
+    done
+fi
+
+exit 0
+
     if ! cmp -s "$NEW_SYSPROXY" "$OLD_SYSPROXY"; then
         NEED_UPDATE=true
     fi

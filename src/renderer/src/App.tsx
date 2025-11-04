@@ -29,8 +29,10 @@ const App: React.FC = () => {
     try {
       const { loggedIn } = await window.api.xboard.checkLogin()
       setIsLoggedIn(loggedIn)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to check login status:', error)
+      // Even if check fails, show login page (not blank)
+      setIsLoggedIn(false)
     } finally {
       setLoading(false)
     }
