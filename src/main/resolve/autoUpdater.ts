@@ -69,19 +69,28 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     // Remove any suffix like -beta, -alpha, etc.
     const parseVersion = (version: string): number[] => {
       // Remove suffix like -beta, -alpha, -rc1, etc.
-      const cleanVersion = version.split('-')[0]
-      return cleanVersion.split('.').map(Number)
+      const cleanVersion = version.split('-')[0].trim()
+      const parts = cleanVersion.split('.').map(Number)
+      // Filter out NaN values and ensure all parts are valid numbers
+      return parts.filter(part => !isNaN(part) && part >= 0)
     }
     
     const currentParts = parseVersion(currentVersion)
     const latestParts = parseVersion(latestVersionInfo.version)
     
     // Get clean version strings for logging
-    const currentCleanVersion = currentVersion.split('-')[0]
-    const latestCleanVersion = latestVersionInfo.version.split('-')[0]
+    const currentCleanVersion = currentVersion.split('-')[0].trim()
+    const latestCleanVersion = latestVersionInfo.version.split('-')[0].trim()
     
     console.log('[AutoUpdater] Current version:', currentVersion, '(', currentCleanVersion, ')')
     console.log('[AutoUpdater] Latest version:', latestVersionInfo.version, '(', latestCleanVersion, ')')
+    console.log('[AutoUpdater] Version parts - current:', currentParts, 'latest:', latestParts)
+    
+    // Validate parsed versions
+    if (currentParts.length === 0 || latestParts.length === 0) {
+      console.error('[AutoUpdater] Invalid version format after parsing - current:', currentParts, 'latest:', latestParts)
+      return undefined
+    }
     
     // Compare versions using semver-like logic
     // Only return update if latest version is newer than current version
@@ -90,22 +99,24 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
       return undefined
     }
     
-    console.log('[AutoUpdater] Version parts - current:', currentParts, 'latest:', latestParts)
-    
     // Compare version arrays
-    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+    const maxLength = Math.max(currentParts.length, latestParts.length)
+    for (let i = 0; i < maxLength; i++) {
       const currentPart = currentParts[i] || 0
       const latestPart = latestParts[i] || 0
       
+      console.log(`[AutoUpdater] Comparing part ${i}: current=${currentPart}, latest=${latestPart}`)
+      
       if (latestPart > currentPart) {
         // Latest version is newer, return update info
-        console.log('[AutoUpdater] Update available:', latestVersionInfo.version)
+        console.log('[AutoUpdater] Update available:', latestVersionInfo.version, '(latest is newer)')
         return latestVersionInfo
       } else if (latestPart < currentPart) {
         // Latest version is older, don't update
         console.log('[AutoUpdater] Latest version is older, no update')
         return undefined
       }
+      // If equal, continue to next part
     }
     
     // Versions are equal (shouldn't happen due to first check, but just in case)
