@@ -3,7 +3,7 @@ import { parseYaml } from '../utils/yaml'
 import { app, shell, dialog } from 'electron'
 import { getAppConfig, getControledMihomoConfig } from '../config'
 import { dataDir, exeDir, exePath, isPortable, resourcesFilesDir } from '../utils/dirs'
-import { copyFile, rm, writeFile, readFile } from 'fs/promises'
+import { copyFile, rm, writeFile, readFile, chmod } from 'fs/promises'
 import path from 'path'
 import { existsSync } from 'fs'
 import { spawn } from 'child_process'
@@ -24,6 +24,8 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     if (updateChannel == 'beta') {
       url = `${baseUrl}/latest-beta.yml`
     }
+    
+    console.log('[AutoUpdater] Checking for updates from:', url)
     
     const res = await axios.get(url, {
       headers: { 'Content-Type': 'application/octet-stream' },
@@ -49,6 +51,7 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     let latestVersionInfo: AppVersion
     try {
       latestVersionInfo = parseYaml<AppVersion>(res.data)
+      console.log('[AutoUpdater] Parsed update info:', latestVersionInfo)
     } catch (parseError) {
       console.error('[AutoUpdater] Failed to parse update info YAML:', parseError)
       return undefined
@@ -62,19 +65,32 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     
     const currentVersion = app.getVersion()
     
-    // Compare versions using semver-like logic
-    // Only return update if latest version is newer than current version
-    if (latestVersionInfo.version === currentVersion) {
-      return undefined
-    }
-    
-    // Parse version strings (e.g., "2.0.4" -> [2, 0, 4])
+    // Parse version strings (e.g., "2.0.4" -> [2, 0, 4], "2.0.3-beta" -> [2, 0, 3])
+    // Remove any suffix like -beta, -alpha, etc.
     const parseVersion = (version: string): number[] => {
-      return version.split('.').map(Number)
+      // Remove suffix like -beta, -alpha, -rc1, etc.
+      const cleanVersion = version.split('-')[0]
+      return cleanVersion.split('.').map(Number)
     }
     
     const currentParts = parseVersion(currentVersion)
     const latestParts = parseVersion(latestVersionInfo.version)
+    
+    // Get clean version strings for logging
+    const currentCleanVersion = currentVersion.split('-')[0]
+    const latestCleanVersion = latestVersionInfo.version.split('-')[0]
+    
+    console.log('[AutoUpdater] Current version:', currentVersion, '(', currentCleanVersion, ')')
+    console.log('[AutoUpdater] Latest version:', latestVersionInfo.version, '(', latestCleanVersion, ')')
+    
+    // Compare versions using semver-like logic
+    // Only return update if latest version is newer than current version
+    if (currentCleanVersion === latestCleanVersion) {
+      console.log('[AutoUpdater] Versions are equal, no update needed')
+      return undefined
+    }
+    
+    console.log('[AutoUpdater] Version parts - current:', currentParts, 'latest:', latestParts)
     
     // Compare version arrays
     for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
@@ -83,14 +99,17 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
       
       if (latestPart > currentPart) {
         // Latest version is newer, return update info
+        console.log('[AutoUpdater] Update available:', latestVersionInfo.version)
         return latestVersionInfo
       } else if (latestPart < currentPart) {
         // Latest version is older, don't update
+        console.log('[AutoUpdater] Latest version is older, no update')
         return undefined
       }
     }
     
     // Versions are equal (shouldn't happen due to first check, but just in case)
+    console.log('[AutoUpdater] Versions are equal after comparison')
     return undefined
   } catch (error: any) {
     console.error('[AutoUpdater] Error checking for updates:', error.message)
@@ -194,8 +213,12 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
       // For Windows .exe installer:
       // 1. Exit the app first (this releases file locks)
       // 2. Launch installer with /S (silent) flag
-      // 3. Installer will automatically restart the app after installation (via runAfterFinish: true)
+      // 3. After installation, manually start the application
       const installerPath = path.join(dataDir(), file)
+      const appExePath = exePath()
+      
+      console.log('[AutoUpdater] Windows installer path:', installerPath)
+      console.log('[AutoUpdater] Application exe path:', appExePath)
       
       // Show dialog to inform user
       if (mainWindow) {
@@ -207,29 +230,76 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
           buttons: ['确定']
         }).then(() => {
           setNotQuitDialog()
-          app.quit()
           
-          // Wait for app to quit, then launch installer
-          setTimeout(() => {
+          // Create a script to wait for installer to finish, then start the app
+          const restartScript = `
+@echo off
+timeout /t 2 /nobreak >nul
+"${installerPath}" /S
+:wait
+timeout /t 1 /nobreak >nul
+tasklist /FI "IMAGENAME eq ${path.basename(installerPath)}" 2>NUL | find /I /N "${path.basename(installerPath)}">NUL
+if "%ERRORLEVEL%"=="0" goto wait
+timeout /t 2 /nobreak >nul
+start "" "${appExePath}"
+`
+          
+          // Write script to temp file
+          const scriptPath = path.join(dataDir(), 'restart-after-update.bat')
+          writeFile(scriptPath, restartScript, 'utf8').then(() => {
+            // Launch the script
+            spawn('cmd', ['/C', `"${scriptPath}"`], {
+              shell: true,
+              detached: true,
+              stdio: 'ignore'
+            }).unref()
+            
+            // Quit the app
+            app.quit()
+          }).catch((err) => {
+            console.error('[AutoUpdater] Failed to create restart script:', err)
+            // Fallback: just launch installer and quit
             spawn(installerPath, ['/S'], {
               detached: true,
               stdio: 'ignore',
               shell: false
             }).unref()
-          }, 1000)
+            app.quit()
+          })
         })
       } else {
-        // If no main window, just quit and launch installer
+        // If no main window, create script and quit
         setNotQuitDialog()
-        app.quit()
         
-        setTimeout(() => {
+        const restartScript = `
+@echo off
+timeout /t 2 /nobreak >nul
+"${installerPath}" /S
+:wait
+timeout /t 1 /nobreak >nul
+tasklist /FI "IMAGENAME eq ${path.basename(installerPath)}" 2>NUL | find /I /N "${path.basename(installerPath)}">NUL
+if "%ERRORLEVEL%"=="0" goto wait
+timeout /t 2 /nobreak >nul
+start "" "${appExePath}"
+`
+        
+        const scriptPath = path.join(dataDir(), 'restart-after-update.bat')
+        writeFile(scriptPath, restartScript, 'utf8').then(() => {
+          spawn('cmd', ['/C', `"${scriptPath}"`], {
+            shell: true,
+            detached: true,
+            stdio: 'ignore'
+          }).unref()
+          app.quit()
+        }).catch((err) => {
+          console.error('[AutoUpdater] Failed to create restart script:', err)
           spawn(installerPath, ['/S'], {
             detached: true,
             stdio: 'ignore',
             shell: false
           }).unref()
-        }, 1000)
+          app.quit()
+        })
       }
     } else if (file.endsWith('.7z')) {
       // For portable Windows .7z:
@@ -256,11 +326,16 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
       app.quit()
     } else if (file.endsWith('.pkg')) {
       // For macOS .pkg installer:
-      // 1. Show message to user that installation will start
-      // 2. Quit app
-      // 3. Launch installer
-      // Note: User must manually complete installation and restart app
+      // 1. Exit the app first (this releases file locks)
+      // 2. Launch installer and wait for it to complete
+      // 3. After installation, start the application
       const pkgPath = path.join(dataDir(), file)
+      const appPath = exePath()
+      // Extract app bundle path from exe path (remove /Contents/MacOS/CrowVPN)
+      const appBundlePath = appPath.replace(/\/Contents\/MacOS\/[^/]+$/, '')
+      
+      console.log('[AutoUpdater] macOS installer path:', pkgPath)
+      console.log('[AutoUpdater] Application bundle path:', appBundlePath)
       
       // Show dialog to inform user
       if (mainWindow) {
@@ -268,29 +343,116 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
           type: 'info',
           title: '准备安装更新',
           message: '即将退出应用并启动安装程序',
-          detail: '安装完成后，请手动重新打开应用。',
+          detail: '安装程序将在安装完成后自动重启应用。\n\n安装过程需要管理员权限。',
           buttons: ['确定']
         }).then(() => {
           setNotQuitDialog()
-          app.quit()
           
-          // Wait for app to quit, then open installer
-          setTimeout(() => {
-            shell.openPath(pkgPath).catch((err) => {
-              console.error('[AutoUpdater] Failed to open installer:', err)
+          // Create a script to install and restart
+          const restartScript = `#!/bin/bash
+# Wait for app to quit
+sleep 2
+
+# Open installer (will require admin password)
+open "${pkgPath}"
+
+# Wait for installer process to complete
+while pgrep -f "Installer.app" > /dev/null; do
+  sleep 1
+done
+
+# Wait a bit more for installation to fully complete
+sleep 2
+
+# Launch the newly installed app
+open "${appBundlePath}"
+`
+          
+          // Write script to temp file
+          const scriptPath = path.join(dataDir(), 'restart-after-update.sh')
+          writeFile(scriptPath, restartScript, 'utf8').then(() => {
+            // Make script executable
+            chmod(scriptPath, 0o755).then(() => {
+              // Launch the script
+              spawn('bash', [scriptPath], {
+                detached: true,
+                stdio: 'ignore',
+                shell: false
+              }).unref()
+              
+              // Quit the app
+              app.quit()
+            }).catch((err) => {
+              console.error('[AutoUpdater] Failed to make script executable:', err)
+              // Try to launch script anyway
+              spawn('bash', [scriptPath], {
+                detached: true,
+                stdio: 'ignore',
+                shell: false
+              }).unref()
+              app.quit()
             })
-          }, 1000)
+          }).catch((err) => {
+            console.error('[AutoUpdater] Failed to create restart script:', err)
+            // Fallback: just open installer and quit
+            setTimeout(() => {
+              shell.openPath(pkgPath).catch((openErr) => {
+                console.error('[AutoUpdater] Failed to open installer:', openErr)
+              })
+            }, 1000)
+            app.quit()
+          })
         })
       } else {
-        // If no main window, just quit and open installer
+        // If no main window, create script and quit
         setNotQuitDialog()
-        app.quit()
         
-        setTimeout(() => {
-          shell.openPath(pkgPath).catch((err) => {
-            console.error('[AutoUpdater] Failed to open installer:', err)
+        const restartScript = `#!/bin/bash
+# Wait for app to quit
+sleep 2
+
+# Open installer (will require admin password)
+open "${pkgPath}"
+
+# Wait for installer process to complete
+while pgrep -f "Installer.app" > /dev/null; do
+  sleep 1
+done
+
+# Wait a bit more for installation to fully complete
+sleep 2
+
+# Launch the newly installed app
+open "${appBundlePath}"
+`
+        
+        const scriptPath = path.join(dataDir(), 'restart-after-update.sh')
+        writeFile(scriptPath, restartScript, 'utf8').then(() => {
+          chmod(scriptPath, 0o755).then(() => {
+            spawn('bash', [scriptPath], {
+              detached: true,
+              stdio: 'ignore',
+              shell: false
+            }).unref()
+            app.quit()
+          }).catch((err) => {
+            console.error('[AutoUpdater] Failed to make script executable:', err)
+            spawn('bash', [scriptPath], {
+              detached: true,
+              stdio: 'ignore',
+              shell: false
+            }).unref()
+            app.quit()
           })
-        }, 1000)
+        }).catch((err) => {
+          console.error('[AutoUpdater] Failed to create restart script:', err)
+          setTimeout(() => {
+            shell.openPath(pkgPath).catch((openErr) => {
+              console.error('[AutoUpdater] Failed to open installer:', openErr)
+            })
+          }, 1000)
+          app.quit()
+        })
       }
     }
   } catch (e) {
