@@ -36,7 +36,7 @@ import { mainWindow } from '..'
 import path from 'path'
 import os from 'os'
 import net from 'net'
-import { createWriteStream, existsSync } from 'fs'
+import { createWriteStream, existsSync, accessSync, constants } from 'fs'
 import { uploadRuntimeConfig } from '../resolve/gistApi'
 import { startMonitor } from '../resolve/trafficMonitor'
 import { disableSysProxy, triggerSysProxy } from '../sys/sysproxy'
@@ -994,6 +994,47 @@ async function checkProfile(): Promise<void> {
   const env = {
     SAFE_PATHS: safePaths.join(path.delimiter)
   }
+  
+  // 在 macOS 上，先检查内核可执行文件的基本信息
+  if (process.platform === 'darwin') {
+    // 检查内核可执行文件是否存在
+    if (!existsSync(corePath)) {
+      const errorMsg = `内核可执行文件不存在: ${corePath}\n请重新安装应用程序或检查内核文件是否完整。`
+      console.error('[Manager]', errorMsg)
+      await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+      throw new Error(errorMsg)
+    }
+    
+    // 检查内核可执行文件是否有执行权限
+    try {
+      accessSync(corePath, constants.F_OK | constants.X_OK)
+    } catch (accessError) {
+      const errorMsg = `内核可执行文件没有执行权限: ${corePath}\n这可能是 macOS Big Sur 的兼容性问题。\n\n解决方案：\n1. 在终端中运行: chmod +x "${corePath}"\n2. 或者重新安装应用程序`
+      console.error('[Manager]', errorMsg)
+      await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+      throw new Error(errorMsg)
+    }
+    
+    // 尝试检查内核可执行文件是否可以运行（通过 --version 或类似命令）
+    try {
+      await execFilePromise(corePath, ['--version'], { 
+        env,
+        timeout: 5000,
+        maxBuffer: 1024 * 1024
+      })
+    } catch (versionError: any) {
+      // 如果 --version 失败，可能是兼容性问题
+      const isBigSur = os.release().startsWith('20.') // Big Sur 版本号以 20. 开头
+      if (isBigSur && (versionError.code === 'ENOENT' || versionError.code === 'EACCES' || versionError.signal === 'SIGKILL')) {
+        const errorMsg = `内核可执行文件无法在 macOS Big Sur 上运行: ${corePath}\n\n这可能是内核可执行文件与 macOS Big Sur 11.7 不兼容导致的。\n\n可能的解决方案：\n1. 检查内核可执行文件是否为当前架构编译（x64 或 arm64）\n2. 尝试在终端中手动运行: "${corePath}" --version\n3. 如果仍然失败，可能需要使用兼容的内核版本\n4. 检查系统日志: Console.app -> 查看崩溃报告`
+        console.error('[Manager]', errorMsg)
+        await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+        throw new Error(errorMsg)
+      }
+      // 其他错误暂时忽略，继续配置文件检查
+    }
+  }
+  
   try {
     await execFilePromise(
       corePath,
@@ -1004,7 +1045,7 @@ async function checkProfile(): Promise<void> {
         '-d',
         mihomoTestDir()
       ],
-      { env }
+      { env, timeout: 30000, maxBuffer: 1024 * 1024 }
     )
   } catch (error: any) {
     let errorMessage = 'Profile Check Failed'
@@ -1015,8 +1056,29 @@ async function checkProfile(): Promise<void> {
       errorDetails.push(`配置文件不存在: ${configPath}`)
     }
     
+    // 检查是否是 macOS Big Sur 特定的问题
+    if (process.platform === 'darwin') {
+      const isBigSur = os.release().startsWith('20.')
+      if (isBigSur) {
+        errorDetails.push(`\n注意: 检测到 macOS Big Sur 系统，可能存在兼容性问题`)
+      }
+    }
+    
     // 提取错误信息
     if (error && typeof error === 'object') {
+      // 检查错误代码
+      if (error.code === 'ENOENT') {
+        errorDetails.push(`内核可执行文件不存在或无法访问: ${corePath}`)
+      } else if (error.code === 'EACCES') {
+        errorDetails.push(`内核可执行文件没有执行权限: ${corePath}`)
+      } else if (error.code === 'EAGAIN' || error.code === 'EMFILE' || error.code === 'ENFILE') {
+        errorDetails.push(`系统资源不足，无法启动内核进程`)
+      } else if (error.signal === 'SIGKILL') {
+        errorDetails.push(`内核进程被系统强制终止（可能是兼容性问题或系统限制）`)
+      } else if (error.code) {
+        errorDetails.push(`系统错误代码: ${error.code}`)
+      }
+      
       // 检查 stdout
       if (error.stdout) {
         const stdoutStr = String(error.stdout)
@@ -1062,9 +1124,9 @@ async function checkProfile(): Promise<void> {
     
     // 添加配置文件路径信息
     if (errorDetails.length > 0) {
-      errorMessage = `Profile Check Failed:\n配置文件: ${configPath}\n\n${errorDetails.join('\n')}`
+      errorMessage = `Profile Check Failed:\n内核路径: ${corePath}\n配置文件: ${configPath}\n\n${errorDetails.join('\n')}`
     } else {
-      errorMessage = `Profile Check Failed:\n配置文件: ${configPath}\n\n未知错误，请检查配置文件格式是否正确。`
+      errorMessage = `Profile Check Failed:\n内核路径: ${corePath}\n配置文件: ${configPath}\n\n未知错误，请检查配置文件格式是否正确。`
     }
     
     console.error('[Manager] Profile check failed:', errorMessage)
