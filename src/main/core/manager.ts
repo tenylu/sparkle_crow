@@ -989,6 +989,7 @@ async function checkProfile(): Promise<void> {
   const { core = 'mihomo', diffWorkDir = false, safePaths = [] } = await getAppConfig()
   const { current } = await getProfileConfig()
   const corePath = mihomoCorePath(core)
+  const configPath = diffWorkDir ? mihomoWorkConfigPath(current) : mihomoWorkConfigPath('work')
   const execFilePromise = promisify(execFile)
   const env = {
     SAFE_PATHS: safePaths.join(path.delimiter)
@@ -999,23 +1000,76 @@ async function checkProfile(): Promise<void> {
       [
         '-t',
         '-f',
-        diffWorkDir ? mihomoWorkConfigPath(current) : mihomoWorkConfigPath('work'),
+        configPath,
         '-d',
         mihomoTestDir()
       ],
       { env }
     )
-  } catch (error) {
-    if (error instanceof Error && 'stdout' in error) {
-      const { stdout } = error as { stdout: string }
-      const errorLines = stdout
-        .split('\n')
-        .filter((line) => line.includes('level=error'))
-        .map((line) => line.split('level=error')[1])
-      throw new Error(`Profile Check Failed:\n${errorLines.join('\n')}`)
-    } else {
-      throw error
+  } catch (error: any) {
+    let errorMessage = 'Profile Check Failed'
+    const errorDetails: string[] = []
+    
+    // 检查配置文件是否存在
+    if (!existsSync(configPath)) {
+      errorDetails.push(`配置文件不存在: ${configPath}`)
     }
+    
+    // 提取错误信息
+    if (error && typeof error === 'object') {
+      // 检查 stdout
+      if (error.stdout) {
+        const stdoutStr = String(error.stdout)
+        const errorLines = stdoutStr
+          .split('\n')
+          .filter((line) => line.includes('level=error'))
+          .map((line) => line.split('level=error')[1]?.trim())
+          .filter(Boolean)
+        
+        if (errorLines.length > 0) {
+          errorDetails.push(...errorLines)
+        } else if (stdoutStr.trim()) {
+          // 如果没有找到 level=error，但 stdout 有内容，显示所有非空行
+          const allLines = stdoutStr
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('time='))
+          if (allLines.length > 0) {
+            errorDetails.push(...allLines)
+          }
+        }
+      }
+      
+      // 检查 stderr
+      if (error.stderr) {
+        const stderrStr = String(error.stderr).trim()
+        if (stderrStr) {
+          const stderrLines = stderrStr
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+          if (stderrLines.length > 0) {
+            errorDetails.push(...stderrLines)
+          }
+        }
+      }
+      
+      // 如果都没有，使用错误消息本身
+      if (errorDetails.length === 0 && error.message) {
+        errorDetails.push(error.message)
+      }
+    }
+    
+    // 添加配置文件路径信息
+    if (errorDetails.length > 0) {
+      errorMessage = `Profile Check Failed:\n配置文件: ${configPath}\n\n${errorDetails.join('\n')}`
+    } else {
+      errorMessage = `Profile Check Failed:\n配置文件: ${configPath}\n\n未知错误，请检查配置文件格式是否正确。`
+    }
+    
+    console.error('[Manager] Profile check failed:', errorMessage)
+    await writeFile(logPath(), `[Manager]: ${errorMessage}\n`, { flag: 'a' })
+    throw new Error(errorMessage)
   }
 }
 
