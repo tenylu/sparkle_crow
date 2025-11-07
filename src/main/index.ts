@@ -751,11 +751,10 @@ app.whenReady().then(async () => {
         throw new Error('未选择代理节点，无法切换模式')
       }
       
-      // IMPORTANT: Only update mode via API, do NOT write to config file
-      // Writing to config file might trigger mihomo auto-reload and disconnect
-      // For global mode, mihomo should ignore rules when mode is 'global'
-      // The rules in config file are only used for rule mode
-      
+      // Update mode and rules via API (similar to direct mode implementation)
+      // For global mode: rules should be empty []
+      // For rule mode: rules should contain routing rules
+      // Note: TypeScript types don't include rules, but mihomo API supports it at runtime
       const { patchMihomoConfig } = await import('./core/mihomoApi')
       const { getControledMihomoConfig } = await import('./config')
       
@@ -763,13 +762,31 @@ app.whenReady().then(async () => {
       const controledConfig = await getControledMihomoConfig()
       const newMode = controledConfig.mode || mode
       
-      // Only update mode via API - do NOT update config file or rules
-      // Mihomo should handle global mode correctly even if rules exist in config
-      // When mode is 'global', mihomo ignores rules and routes all traffic through default proxy
+      // Build rules based on mode (same logic as buildXboardConfig)
+      let rules: string[] = []
+      if (newMode === 'global') {
+        // Global mode: empty rules, all traffic goes through default proxy
+        rules = []
+      } else {
+        // Rule mode: include routing rules
+        rules = [
+          'DOMAIN-SUFFIX,local,DIRECT',
+          'IP-CIDR,127.0.0.0/8,DIRECT',
+          'IP-CIDR,172.16.0.0/12,DIRECT',
+          'IP-CIDR,192.168.0.0/16,DIRECT',
+          'IP-CIDR,10.0.0.0/8,DIRECT',
+          'GEOIP,CN,DIRECT',
+          `MATCH,${proxyState.selectedNodeName}`
+        ]
+      }
+      
+      // Update mode and rules via API (mihomo API supports rules even if TypeScript types don't show it)
+      // This is the same approach used in direct mode shortcut
       await patchMihomoConfig({
-        mode: newMode as 'rule' | 'global'
-      })
-      console.log('[Main] Mode switched via API (mode only, no file write to avoid disconnect)')
+        mode: newMode as 'rule' | 'global',
+        rules: rules
+      } as any) // Use 'as any' because TypeScript types don't include rules, but API supports it
+      console.log('[Main] Mode switched via API (mode and rules updated):', newMode, 'rules count:', rules.length)
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it

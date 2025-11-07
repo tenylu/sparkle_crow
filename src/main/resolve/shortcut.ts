@@ -87,14 +87,29 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'rule' }, false)
           
-          // Get current mode and update via API only (no file write)
-          const { getControledMihomoConfig } = await import('../config')
-          const controledConfig = await getControledMihomoConfig()
+          // Get proxy state to build rules
+          const { getXboardProxyState } = await import('../config/xboard')
+          const proxyState = getXboardProxyState()
           
-          // Only update mode via API - do NOT write to config file
+          // Build rules for rule mode
+          let rules: string[] = []
+          if (proxyState?.selectedNodeName) {
+            rules = [
+              'DOMAIN-SUFFIX,local,DIRECT',
+              'IP-CIDR,127.0.0.0/8,DIRECT',
+              'IP-CIDR,172.16.0.0/12,DIRECT',
+              'IP-CIDR,192.168.0.0/16,DIRECT',
+              'IP-CIDR,10.0.0.0/8,DIRECT',
+              'GEOIP,CN,DIRECT',
+              `MATCH,${proxyState.selectedNodeName}`
+            ]
+          }
+          
+          // Update mode and rules via API (same approach as direct mode)
           await patchMihomoConfig({
-            mode: controledConfig.mode as 'rule' | 'global'
-          })
+            mode: 'rule',
+            rules: rules
+          } as any)
           new Notification({
             title: '已切换至规则模式'
           }).show()
@@ -122,14 +137,12 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'global' }, false)
           
-          // Get current mode and update via API only (no file write)
-          const { getControledMihomoConfig } = await import('../config')
-          const controledConfig = await getControledMihomoConfig()
-          
-          // Only update mode via API - do NOT write to config file
+          // Global mode: empty rules, all traffic goes through default proxy
+          // Update mode and rules via API (same approach as direct mode)
           await patchMihomoConfig({
-            mode: controledConfig.mode as 'rule' | 'global'
-          })
+            mode: 'global',
+            rules: []
+          } as any)
           new Notification({
             title: '已切换至全局模式'
           }).show()
