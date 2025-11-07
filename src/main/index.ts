@@ -739,54 +739,37 @@ app.whenReady().then(async () => {
       setXboardProxyState({ mode: mode as 'rule' | 'global' })
       console.log('[Main] Updated proxy state with mode:', mode)
       
-      // Update controledMihomoConfig with new mode (skip auto-generate profile for hot-reload)
+      // Update controledMihomoConfig with new mode
       const { patchControledMihomoConfig } = await import('./config')
       await patchControledMihomoConfig({ mode: mode as 'rule' | 'global' }, false)
       console.log('[Main] Updated controledMihomoConfig with mode:', mode)
       
-      // Switch mode via API hot-reload (no restart, no reconnection)
-      const { patchMihomoConfig } = await import('./core/mihomoApi')
+      // Verify proxy node exists
       const { getXboardProxyState } = await import('./config/xboard')
       const proxyState = getXboardProxyState()
-      
-      // Build rules based on mode
-      let rules: string[] = []
       if (!proxyState?.selectedNodeName) {
         throw new Error('未选择代理节点，无法切换模式')
       }
       
-      if (mode === 'global') {
-        // Global mode: all traffic goes through proxy (only local traffic is direct)
-        rules = [
-          'DOMAIN-SUFFIX,local,DIRECT',
-          'IP-CIDR,127.0.0.0/8,DIRECT',
-          'IP-CIDR,172.16.0.0/12,DIRECT',
-          'IP-CIDR,192.168.0.0/16,DIRECT',
-          'IP-CIDR,10.0.0.0/8,DIRECT',
-          `MATCH,${proxyState.selectedNodeName}`
-        ]
-      } else if (mode === 'rule') {
-        // Rule mode: use rules to determine routing
-        rules = [
-          'DOMAIN-SUFFIX,local,DIRECT',
-          'IP-CIDR,127.0.0.0/8,DIRECT',
-          'IP-CIDR,172.16.0.0/12,DIRECT',
-          'IP-CIDR,192.168.0.0/16,DIRECT',
-          'IP-CIDR,10.0.0.0/8,DIRECT',
-          'GEOIP,CN,DIRECT',
-          `MATCH,${proxyState.selectedNodeName}`
-        ]
-      }
+      // Use the same hot-reload logic as startOrHotReloadCore
+      // This ensures the config is properly updated without restarting
+      const { generateProfile, getRuntimeConfig } = await import('./core/factory')
+      const { patchMihomoConfig } = await import('./core/mihomoApi')
       
-      // Hot-reload mode via API (this does NOT restart the core or disconnect)
-      // IMPORTANT: Only update runtime config via API, do NOT update profile file
-      // Profile file update would trigger restartCore() in setProfileStr() if it's the current profile
-      // Mode switching should only change runtime behavior, not require restart
+      // Regenerate profile to get updated config with new mode
+      // This updates the config file on disk but doesn't reload it yet
+      await generateProfile()
+      
+      // Get the updated runtime config (includes the new mode)
+      const runtimeConfig = await getRuntimeConfig()
+      
+      // Patch only the mode via API (similar to startOrHotReloadCore)
+      // This updates the runtime mode without reloading the entire config
+      // DO NOT include rules in the patch, as that would cause disconnection
       await patchMihomoConfig({
-        mode: mode as 'rule' | 'global',
-        rules: rules
+        mode: runtimeConfig.mode as 'rule' | 'global'
       })
-      console.log('[Main] Mode switched via API hot-reload successfully (no restart, no file update)')
+      console.log('[Main] Mode switched via API hot-reload (mode only, no rules/config reload to avoid disconnect)')
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it
