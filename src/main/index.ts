@@ -731,27 +731,83 @@ app.whenReady().then(async () => {
       setXboardProxyState({ mode: mode as 'rule' | 'global' })
       console.log('[Main] Updated proxy state with mode:', mode)
       
-      // Rebuild Xboard profile with unified config (including updated mode)
-      console.log('[Main] Rebuilding Xboard profile with unified config')
-      const profileId = 'xboard-vpn'
-      const unifiedConfig = await buildXboardConfig()
-      const configStr = stringifyYaml(unifiedConfig)
-      const { setProfileStr } = await import('./config')
-      await setProfileStr(profileId, configStr)
-      console.log('[Main] Profile updated with unified config')
+      // Update controledMihomoConfig with new mode (skip auto-generate profile for hot-reload)
+      const { patchControledMihomoConfig } = await import('./config')
+      await patchControledMihomoConfig({ mode: mode as 'rule' | 'global' }, false)
+      console.log('[Main] Updated controledMihomoConfig with mode:', mode)
       
-      // Restart core to apply (will call generateProfile to merge profile + controledMihomoConfig)
-      console.log('[Main] Restarting core to apply mode changes')
-      await stopCore()
-      await startCore()
-      console.log('[Main] Mode switched successfully')
-      
-      // Send notification
-      new Notification({
-        title: mode === 'global' ? '已切换至全局模式' : '已切换至规则模式'
-      }).show()
-      
-      return { success: true }
+      // Try to hot-reload mode via API first (avoids disconnection)
+      try {
+        const { patchMihomoConfig } = await import('./core/mihomoApi')
+        const { getXboardProxyState } = await import('./config/xboard')
+        const proxyState = getXboardProxyState()
+        
+        // Build rules based on mode
+        let rules: string[] = []
+        if (mode === 'rule' && proxyState?.selectedNodeName) {
+          rules = [
+            'DOMAIN-SUFFIX,local,DIRECT',
+            'IP-CIDR,127.0.0.0/8,DIRECT',
+            'IP-CIDR,172.16.0.0/12,DIRECT',
+            'IP-CIDR,192.168.0.0/16,DIRECT',
+            'IP-CIDR,10.0.0.0/8,DIRECT',
+            'GEOIP,CN,DIRECT',
+            `MATCH,${proxyState.selectedNodeName}`
+          ]
+        }
+        
+        // Try hot-reload via API
+        await patchMihomoConfig({
+          mode: mode as 'rule' | 'global',
+          rules: rules
+        })
+        console.log('[Main] Mode switched via API hot-reload successfully')
+        
+        // Update profile file in background (for consistency, but not required for immediate operation)
+        const profileId = 'xboard-vpn'
+        const unifiedConfig = await buildXboardConfig()
+        const configStr = stringifyYaml(unifiedConfig)
+        const { setProfileStr } = await import('./config')
+        await setProfileStr(profileId, configStr)
+        console.log('[Main] Profile updated with unified config')
+        
+        // Notify frontend of config update
+        mainWindow?.webContents.send('controledMihomoConfigUpdated')
+        
+        // Send notification
+        new Notification({
+          title: mode === 'global' ? '已切换至全局模式' : '已切换至规则模式'
+        }).show()
+        
+        return { success: true }
+      } catch (apiError: any) {
+        console.warn('[Main] API hot-reload failed, falling back to restart:', apiError.message)
+        
+        // Fallback: rebuild profile and restart core
+        console.log('[Main] Rebuilding Xboard profile with unified config')
+        const profileId = 'xboard-vpn'
+        const unifiedConfig = await buildXboardConfig()
+        const configStr = stringifyYaml(unifiedConfig)
+        const { setProfileStr } = await import('./config')
+        await setProfileStr(profileId, configStr)
+        console.log('[Main] Profile updated with unified config')
+        
+        // Restart core to apply (will call generateProfile to merge profile + controledMihomoConfig)
+        console.log('[Main] Restarting core to apply mode changes')
+        await stopCore()
+        await startCore()
+        console.log('[Main] Mode switched successfully via restart')
+        
+        // Notify frontend of config update
+        mainWindow?.webContents.send('controledMihomoConfigUpdated')
+        
+        // Send notification
+        new Notification({
+          title: mode === 'global' ? '已切换至全局模式' : '已切换至规则模式'
+        }).show()
+        
+        return { success: true }
+      }
     } catch (error: any) {
       console.error('[Main] Switch mode error:', error.message)
       throw new Error(error.message || 'Failed to switch mode')
