@@ -798,6 +798,11 @@ app.whenReady().then(async () => {
         await startCore()
         console.log('[Main] Mode switched successfully via restart')
         
+        // IMPORTANT: Do NOT automatically trigger system proxy when switching modes
+        // System proxy should only be changed when explicitly requested by user
+        // The system proxy state should remain unchanged after mode switch
+        // We intentionally do NOT call triggerSysProxy() here, even if it was enabled before
+        
         // Notify frontend of config update
         mainWindow?.webContents.send('controledMihomoConfigUpdated')
         
