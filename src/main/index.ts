@@ -751,49 +751,36 @@ app.whenReady().then(async () => {
         throw new Error('未选择代理节点，无法切换模式')
       }
       
-      // IMPORTANT: Do NOT call generateProfile() here as it writes to config file
-      // Writing to config file might trigger mihomo to auto-reload, causing disconnection
-      // Instead, we only update the runtime mode via API without touching config files
+      // Use startOrHotReloadCore logic to properly update mode and rules
+      // This ensures both mode and rules are correctly set for global/rule mode
+      // For global mode, rules must be empty; for rule mode, rules must have proper routing
+      const { generateProfile, getRuntimeConfig } = await import('./core/factory')
+      const { patchMihomoConfig } = await import('./core/mihomoApi')
       
-      const { patchMihomoConfig, mihomoProxies, mihomoChangeProxy } = await import('./core/mihomoApi')
+      // Generate new config with updated mode (this writes to config file)
+      // The config file will have correct rules based on mode:
+      // - global mode: rules = []
+      // - rule mode: rules with GEOIP,CN,DIRECT and MATCH
+      await generateProfile()
       
-      // Get current mode from controledMihomoConfig (already updated above)
-      const { getControledMihomoConfig } = await import('./config')
-      const controledConfig = await getControledMihomoConfig()
-      const newMode = controledConfig.mode || mode
+      // Get the updated runtime config (includes correct mode and rules)
+      const runtimeConfig = await getRuntimeConfig()
       
-      // Verify proxy still exists before switching mode
-      try {
-        const proxies = await mihomoProxies()
-        const proxyExists = proxies.proxies && proxyState.selectedNodeName in proxies.proxies
-        if (!proxyExists) {
-          console.warn(`[Main] Proxy ${proxyState.selectedNodeName} not found in runtime, may cause disconnection`)
-        }
-      } catch (error: any) {
-        console.warn('[Main] Failed to verify proxy before mode switch:', error.message)
+      // Hot-reload via API (similar to startOrHotReloadCore)
+      // This updates both mode and ensures rules are correct
+      // Note: This may cause brief disconnection, but it's necessary for correct behavior
+      const patchData: Partial<ControllerConfigs> = {
+        mode: runtimeConfig.mode as 'rule' | 'global',
+        tun: runtimeConfig.tun as any,
+        'allow-lan': runtimeConfig['allow-lan'],
+        'mixed-port': runtimeConfig['mixed-port']
       }
+      await patchMihomoConfig(patchData)
+      console.log('[Main] Mode switched via hot-reload (config regenerated, mode and settings updated)')
       
-      // Patch only the mode via API (do NOT update config file or rules)
-      // This updates the runtime mode without reloading the entire config or disconnecting
-      await patchMihomoConfig({
-        mode: newMode as 'rule' | 'global'
-      })
-      console.log('[Main] Mode switched via API hot-reload (mode only, no file write, no rules update to avoid disconnect)')
-      
-      // After mode switch, verify and ensure proxy selection is still valid
-      // In global mode, mihomo uses the default proxy (config.proxy), which should already be set
-      // But we verify the proxy is still accessible after mode switch
-      try {
-        const proxies = await mihomoProxies()
-        if (proxies.proxies && proxyState.selectedNodeName in proxies.proxies) {
-          // Proxy exists, connection should be fine
-          console.log('[Main] Proxy verified after mode switch:', proxyState.selectedNodeName)
-        } else {
-          console.warn('[Main] Proxy not found after mode switch, connection may be broken')
-        }
-      } catch (error: any) {
-        console.warn('[Main] Failed to verify proxy after mode switch:', error.message)
-      }
+      // Note: Rules are handled by the config file, not directly via API
+      // When mode is 'global', the config file has rules = [], which mihomo will use
+      // When mode is 'rule', the config file has proper routing rules
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it
