@@ -751,36 +751,25 @@ app.whenReady().then(async () => {
         throw new Error('未选择代理节点，无法切换模式')
       }
       
-      // Use startOrHotReloadCore logic to properly update mode and rules
-      // This ensures both mode and rules are correctly set for global/rule mode
-      // For global mode, rules must be empty; for rule mode, rules must have proper routing
-      const { generateProfile, getRuntimeConfig } = await import('./core/factory')
+      // IMPORTANT: Only update mode via API, do NOT write to config file
+      // Writing to config file might trigger mihomo auto-reload and disconnect
+      // For global mode, mihomo should ignore rules when mode is 'global'
+      // The rules in config file are only used for rule mode
+      
       const { patchMihomoConfig } = await import('./core/mihomoApi')
+      const { getControledMihomoConfig } = await import('./config')
       
-      // Generate new config with updated mode (this writes to config file)
-      // The config file will have correct rules based on mode:
-      // - global mode: rules = []
-      // - rule mode: rules with GEOIP,CN,DIRECT and MATCH
-      await generateProfile()
+      // Get current mode from controledMihomoConfig (already updated above)
+      const controledConfig = await getControledMihomoConfig()
+      const newMode = controledConfig.mode || mode
       
-      // Get the updated runtime config (includes correct mode and rules)
-      const runtimeConfig = await getRuntimeConfig()
-      
-      // Hot-reload via API (similar to startOrHotReloadCore)
-      // This updates both mode and ensures rules are correct
-      // Note: This may cause brief disconnection, but it's necessary for correct behavior
-      const patchData: Partial<ControllerConfigs> = {
-        mode: runtimeConfig.mode as 'rule' | 'global',
-        tun: runtimeConfig.tun as any,
-        'allow-lan': runtimeConfig['allow-lan'],
-        'mixed-port': runtimeConfig['mixed-port']
-      }
-      await patchMihomoConfig(patchData)
-      console.log('[Main] Mode switched via hot-reload (config regenerated, mode and settings updated)')
-      
-      // Note: Rules are handled by the config file, not directly via API
-      // When mode is 'global', the config file has rules = [], which mihomo will use
-      // When mode is 'rule', the config file has proper routing rules
+      // Only update mode via API - do NOT update config file or rules
+      // Mihomo should handle global mode correctly even if rules exist in config
+      // When mode is 'global', mihomo ignores rules and routes all traffic through default proxy
+      await patchMihomoConfig({
+        mode: newMode as 'rule' | 'global'
+      })
+      console.log('[Main] Mode switched via API (mode only, no file write to avoid disconnect)')
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it

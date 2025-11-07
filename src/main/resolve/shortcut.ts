@@ -10,7 +10,6 @@ import { triggerSysProxy } from '../sys/sysproxy'
 import { patchMihomoConfig } from '../core/mihomoApi'
 import { quitWithoutCore, restartCore } from '../core/manager'
 import { floatingWindow, triggerFloatingWindow } from './floatingWindow'
-import type { ControllerConfigs } from '../../shared/types/controller'
 
 export async function registerShortcut(
   oldShortcut: string,
@@ -88,19 +87,14 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'rule' }, false)
           
-          // Use hot-reload logic to properly update mode and rules
-          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
-          await generateProfile()
-          const runtimeConfig = await getRuntimeConfig()
+          // Get current mode and update via API only (no file write)
+          const { getControledMihomoConfig } = await import('../config')
+          const controledConfig = await getControledMihomoConfig()
           
-          // Hot-reload via API (this ensures both mode and rules are correct)
-          const patchData: Partial<ControllerConfigs> = {
-            mode: runtimeConfig.mode as 'rule' | 'global',
-            tun: runtimeConfig.tun as any,
-            'allow-lan': runtimeConfig['allow-lan'],
-            'mixed-port': runtimeConfig['mixed-port']
-          }
-          await patchMihomoConfig(patchData)
+          // Only update mode via API - do NOT write to config file
+          await patchMihomoConfig({
+            mode: controledConfig.mode as 'rule' | 'global'
+          })
           new Notification({
             title: '已切换至规则模式'
           }).show()
@@ -128,19 +122,14 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'global' }, false)
           
-          // Use hot-reload logic to properly update mode and rules
-          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
-          await generateProfile()
-          const runtimeConfig = await getRuntimeConfig()
+          // Get current mode and update via API only (no file write)
+          const { getControledMihomoConfig } = await import('../config')
+          const controledConfig = await getControledMihomoConfig()
           
-          // Hot-reload via API (this ensures both mode and rules are correct)
-          const patchData: Partial<ControllerConfigs> = {
-            mode: runtimeConfig.mode as 'rule' | 'global',
-            tun: runtimeConfig.tun as any,
-            'allow-lan': runtimeConfig['allow-lan'],
-            'mixed-port': runtimeConfig['mixed-port']
-          }
-          await patchMihomoConfig(patchData)
+          // Only update mode via API - do NOT write to config file
+          await patchMihomoConfig({
+            mode: controledConfig.mode as 'rule' | 'global'
+          })
           new Notification({
             title: '已切换至全局模式'
           }).show()
