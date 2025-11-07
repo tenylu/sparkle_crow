@@ -575,7 +575,8 @@ app.whenReady().then(async () => {
         selectedNodeName: nodeName,
         mode: mode as 'rule' | 'global',
         proxies: doc.proxies,
-        rules: mode === 'global' ? [] : [
+        proxyGroups: Array.isArray(doc['proxy-groups']) ? doc['proxy-groups'] : undefined,
+        rules: mode === 'global' ? [`MATCH,${selectedProxy.name}`] : [
           'DOMAIN-SUFFIX,local,DIRECT',
           'IP-CIDR,127.0.0.0/8,DIRECT',
           'IP-CIDR,172.16.0.0/12,DIRECT',
@@ -620,6 +621,12 @@ app.whenReady().then(async () => {
       
       // Start Mihomo core (already imported at top of file)
       await startCore()
+      try {
+        const { mihomoChangeProxy } = await import('./core/mihomoApi')
+        await mihomoChangeProxy('GLOBAL', selectedProxy.name)
+      } catch (changeError) {
+        console.warn('[Main] Failed to set GLOBAL proxy group:', changeError)
+      }
       
       // Check TUN status: only enable system proxy if TUN is not enabled
       const { getControledMihomoConfig } = await import('./config/controledMihomo')
@@ -765,8 +772,8 @@ app.whenReady().then(async () => {
       // Build rules based on mode (same logic as buildXboardConfig)
       let rules: string[] = []
       if (newMode === 'global') {
-        // Global mode: empty rules, all traffic goes through default proxy
-        rules = []
+        // Global mode: directly forward all traffic to the selected node
+        rules = [`MATCH,${proxyState.selectedNodeName}`]
       } else {
         // Rule mode: include routing rules
         rules = [
@@ -788,9 +795,12 @@ app.whenReady().then(async () => {
       } as any) // Use 'as any' because TypeScript types don't include rules, but API supports it
       console.log('[Main] Mode switched via API (mode and rules updated):', newMode, 'rules count:', rules.length)
       
-      // DO NOT update profile file here - it would trigger restartCore() if current profile matches
-      // Profile file is only used for initial startup, runtime mode changes should not touch it
-      // The controledMihomoConfig and proxyState are already updated, which is sufficient
+      try {
+        const { mihomoChangeProxy } = await import('./core/mihomoApi')
+        await mihomoChangeProxy('GLOBAL', proxyState.selectedNodeName)
+      } catch (changeError) {
+        console.warn('[Main] Failed to set GLOBAL proxy group after mode switch:', changeError)
+      }
       
       // Notify frontend of config update
       mainWindow?.webContents.send('controledMihomoConfigUpdated')

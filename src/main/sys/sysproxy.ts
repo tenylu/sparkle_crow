@@ -110,7 +110,8 @@ async function setSysProxy(onlyActiveDevice: boolean): Promise<void> {
   await startPacServer()
   const { sysProxy } = await getAppConfig()
   const { mode, host, bypass = defaultBypass } = sysProxy
-  const { 'mixed-port': port = 7890 } = await getControledMihomoConfig()
+  const { 'mixed-port': port = 7890 } = await getControledMihomoConfig(true)
+  console.log('[SysProxy] Applying system proxy with port:', port)
   const execFilePromise = promisify(execFile)
   switch (mode || 'manual') {
     case 'auto': {

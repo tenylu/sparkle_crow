@@ -172,33 +172,13 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
             } else {
               // No process found, might be TIME_WAIT, wait more and use same port
               console.log(`[Manager] Port ${actualPort} appears unavailable but no process found, waiting...`)
-              await new Promise((resolve) => setTimeout(resolve, 2000))
-              // Try one more time, if still unavailable, switch port
-              const finalCheck = await new Promise<boolean>((resolve) => {
-                const testServer = net.createServer()
-                testServer.once('error', () => resolve(false))
-                testServer.once('listening', () => {
-                  testServer.close(() => resolve(true))
-                })
-                testServer.listen(actualPort, '127.0.0.1')
-              })
-              if (!finalCheck) {
-                const availablePort = await findAvailablePort(actualPort)
-                console.log(`[Manager] Port ${actualPort} still unavailable after waiting, switching to port ${availablePort}`)
-                await patchControledMihomoConfig({ 'mixed-port': availablePort })
-                await writeFile(logPath(), `[Manager]: Port ${actualPort} still unavailable after waiting, switched to port ${availablePort}\n`, {
-                  flag: 'a'
-                })
-              }
+              // Give the kernel a bit more time (for TIME_WAIT) and keep the same port
+              await new Promise((resolve) => setTimeout(resolve, 3000))
             }
           } catch (error) {
             // lsof/ps might not be available, just switch port
-            console.warn('[Manager] Could not check port usage, switching port:', error)
-            const availablePort = await findAvailablePort(actualPort)
-            await patchControledMihomoConfig({ 'mixed-port': availablePort })
-            await writeFile(logPath(), `[Manager]: Could not check port usage, switched to port ${availablePort}\n`, {
-              flag: 'a'
-            })
+            console.warn('[Manager] Could not determine port usage, keeping configured port:', error)
+            await new Promise((resolve) => setTimeout(resolve, 3000))
           }
         } else {
           // Windows or other platform, just switch port if unavailable

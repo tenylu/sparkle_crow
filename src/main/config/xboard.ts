@@ -16,6 +16,7 @@ export interface XboardProxyState {
   mode?: 'rule' | 'global'
   proxies?: any[]
   rules?: any[]
+  proxyGroups?: any[]
 }
 
 function readConfig(): XboardConfig | null {
@@ -102,7 +103,15 @@ export function getXboardProxyState(): XboardProxyState | null {
 }
 
 export function setXboardProxyState(state: Partial<XboardProxyState>): void {
-  const current = readProxyState() || { selectedNodeName: undefined, mode: undefined, proxies: undefined, rules: undefined }
+  const current =
+    readProxyState() ||
+    {
+      selectedNodeName: undefined,
+      mode: undefined,
+      proxies: undefined,
+      rules: undefined,
+      proxyGroups: undefined
+    }
   const updated = { ...current, ...state }
   writeProxyState(updated)
 }
@@ -143,9 +152,29 @@ export async function buildXboardConfig(): Promise<any> {
   config.proxies = proxyState.proxies
   config.proxy = proxyState.selectedNodeName
   config.mode = proxyState.mode || 'rule'
+  if (Array.isArray(proxyState.proxyGroups) && proxyState.proxyGroups.length > 0) {
+    const clonedGroups = proxyState.proxyGroups.map((group: any) => ({ ...group }))
+    const hasGlobal = clonedGroups.some((group: any) => group?.name === 'GLOBAL')
+    if (!hasGlobal) {
+      clonedGroups.push({
+        name: 'GLOBAL',
+        type: 'select',
+        proxies: [proxyState.selectedNodeName, 'DIRECT']
+      })
+    }
+    config['proxy-groups'] = clonedGroups
+  } else {
+    config['proxy-groups'] = [
+      {
+        name: 'GLOBAL',
+        type: 'select',
+        proxies: [proxyState.selectedNodeName, 'DIRECT']
+      }
+    ]
+  }
   
   if (proxyState.mode === 'global') {
-    config.rules = []
+    config.rules = [`MATCH,${proxyState.selectedNodeName}`]
   } else {
     config.rules = [
       'DOMAIN-SUFFIX,local,DIRECT',
