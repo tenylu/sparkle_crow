@@ -87,14 +87,13 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'rule' }, false)
           
-          // Use the same hot-reload logic as xboard:switchMode
-          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
-          await generateProfile()
-          const runtimeConfig = await getRuntimeConfig()
+          // Get current mode from controledMihomoConfig (already updated above)
+          const { getControledMihomoConfig } = await import('../config')
+          const controledConfig = await getControledMihomoConfig()
           
-          // Patch only the mode via API (do NOT update rules, as that would disconnect)
+          // Patch only the mode via API (do NOT update config file or rules, as that would disconnect)
           await patchMihomoConfig({
-            mode: runtimeConfig.mode as 'rule' | 'global'
+            mode: controledConfig.mode as 'rule' | 'global'
           })
           new Notification({
             title: '已切换至规则模式'
@@ -123,14 +122,13 @@ export async function registerShortcut(
           // Update config files
           await patchControledMihomoConfig({ mode: 'global' }, false)
           
-          // Use the same hot-reload logic as xboard:switchMode
-          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
-          await generateProfile()
-          const runtimeConfig = await getRuntimeConfig()
+          // Get current mode from controledMihomoConfig (already updated above)
+          const { getControledMihomoConfig } = await import('../config')
+          const controledConfig = await getControledMihomoConfig()
           
-          // Patch only the mode via API (do NOT update rules, as that would disconnect)
+          // Patch only the mode via API (do NOT update config file or rules, as that would disconnect)
           await patchMihomoConfig({
-            mode: runtimeConfig.mode as 'rule' | 'global'
+            mode: controledConfig.mode as 'rule' | 'global'
           })
           new Notification({
             title: '已切换至全局模式'

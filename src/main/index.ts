@@ -751,25 +751,23 @@ app.whenReady().then(async () => {
         throw new Error('未选择代理节点，无法切换模式')
       }
       
-      // Use the same hot-reload logic as startOrHotReloadCore
-      // This ensures the config is properly updated without restarting
-      const { generateProfile, getRuntimeConfig } = await import('./core/factory')
+      // IMPORTANT: Do NOT call generateProfile() here as it writes to config file
+      // Writing to config file might trigger mihomo to auto-reload, causing disconnection
+      // Instead, we only update the runtime mode via API without touching config files
+      
       const { patchMihomoConfig } = await import('./core/mihomoApi')
       
-      // Regenerate profile to get updated config with new mode
-      // This updates the config file on disk but doesn't reload it yet
-      await generateProfile()
+      // Get current mode from controledMihomoConfig (already updated above)
+      const { getControledMihomoConfig } = await import('./config')
+      const controledConfig = await getControledMihomoConfig()
+      const newMode = controledConfig.mode || mode
       
-      // Get the updated runtime config (includes the new mode)
-      const runtimeConfig = await getRuntimeConfig()
-      
-      // Patch only the mode via API (similar to startOrHotReloadCore)
-      // This updates the runtime mode without reloading the entire config
-      // DO NOT include rules in the patch, as that would cause disconnection
+      // Patch only the mode via API (do NOT update config file or rules)
+      // This updates the runtime mode without reloading the entire config or disconnecting
       await patchMihomoConfig({
-        mode: runtimeConfig.mode as 'rule' | 'global'
+        mode: newMode as 'rule' | 'global'
       })
-      console.log('[Main] Mode switched via API hot-reload (mode only, no rules/config reload to avoid disconnect)')
+      console.log('[Main] Mode switched via API hot-reload (mode only, no file write, no rules update to avoid disconnect)')
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it
