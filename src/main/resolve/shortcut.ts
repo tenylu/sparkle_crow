@@ -120,14 +120,31 @@ export async function registerShortcut(
       return globalShortcut.register(newShortcut, async () => {
         try {
           // Update proxy state
-          const { setXboardProxyState } = await import('../config/xboard')
+          const { setXboardProxyState, getXboardProxyState } = await import('../config/xboard')
           setXboardProxyState({ mode: 'global' })
           
           // Update config files
           await patchControledMihomoConfig({ mode: 'global' }, false)
           
-          // Hot-reload via API (no restart, no reconnection, empty rules for global mode)
-          await patchMihomoConfig({ mode: 'global', rules: [] })
+          // Get proxy state to build rules
+          const proxyState = getXboardProxyState()
+          if (!proxyState?.selectedNodeName) {
+            console.error('[Shortcut] No proxy selected for global mode')
+            return
+          }
+          
+          // Global mode: all traffic goes through proxy (only local traffic is direct)
+          const rules = [
+            'DOMAIN-SUFFIX,local,DIRECT',
+            'IP-CIDR,127.0.0.0/8,DIRECT',
+            'IP-CIDR,172.16.0.0/12,DIRECT',
+            'IP-CIDR,192.168.0.0/16,DIRECT',
+            'IP-CIDR,10.0.0.0/8,DIRECT',
+            `MATCH,${proxyState.selectedNodeName}`
+          ]
+          
+          // Hot-reload via API (no restart, no reconnection)
+          await patchMihomoConfig({ mode: 'global', rules: rules })
           new Notification({
             title: '已切换至全局模式'
           }).show()

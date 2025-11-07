@@ -751,7 +751,22 @@ app.whenReady().then(async () => {
       
       // Build rules based on mode
       let rules: string[] = []
-      if (mode === 'rule' && proxyState?.selectedNodeName) {
+      if (!proxyState?.selectedNodeName) {
+        throw new Error('未选择代理节点，无法切换模式')
+      }
+      
+      if (mode === 'global') {
+        // Global mode: all traffic goes through proxy (only local traffic is direct)
+        rules = [
+          'DOMAIN-SUFFIX,local,DIRECT',
+          'IP-CIDR,127.0.0.0/8,DIRECT',
+          'IP-CIDR,172.16.0.0/12,DIRECT',
+          'IP-CIDR,192.168.0.0/16,DIRECT',
+          'IP-CIDR,10.0.0.0/8,DIRECT',
+          `MATCH,${proxyState.selectedNodeName}`
+        ]
+      } else if (mode === 'rule') {
+        // Rule mode: use rules to determine routing
         rules = [
           'DOMAIN-SUFFIX,local,DIRECT',
           'IP-CIDR,127.0.0.0/8,DIRECT',
