@@ -79,35 +79,85 @@ export async function registerShortcut(
     }
     case 'ruleModeShortcut': {
       return globalShortcut.register(newShortcut, async () => {
-        await patchControledMihomoConfig({ mode: 'rule' })
-        await patchMihomoConfig({ mode: 'rule' })
-        new Notification({
-          title: '已切换至规则模式'
-        }).show()
-        mainWindow?.webContents.send('controledMihomoConfigUpdated')
-        ipcMain.emit('updateTrayMenu')
+        try {
+          // Update proxy state
+          const { setXboardProxyState, getXboardProxyState } = await import('../config/xboard')
+          setXboardProxyState({ mode: 'rule' })
+          
+          // Update config files
+          await patchControledMihomoConfig({ mode: 'rule' }, false)
+          
+          // Get proxy state to build rules
+          const proxyState = getXboardProxyState()
+          
+          // Build rules for rule mode
+          let rules: string[] = []
+          if (proxyState?.selectedNodeName) {
+            rules = [
+              'DOMAIN-SUFFIX,local,DIRECT',
+              'IP-CIDR,127.0.0.0/8,DIRECT',
+              'IP-CIDR,172.16.0.0/12,DIRECT',
+              'IP-CIDR,192.168.0.0/16,DIRECT',
+              'IP-CIDR,10.0.0.0/8,DIRECT',
+              'GEOIP,CN,DIRECT',
+              `MATCH,${proxyState.selectedNodeName}`
+            ]
+          }
+          
+          // Hot-reload via API (no restart, no reconnection)
+          await patchMihomoConfig({ mode: 'rule', rules: rules })
+          new Notification({
+            title: '已切换至规则模式'
+          }).show()
+          mainWindow?.webContents.send('controledMihomoConfigUpdated')
+          ipcMain.emit('updateTrayMenu')
+        } catch (error) {
+          console.error('[Shortcut] Failed to switch to rule mode:', error)
+        }
       })
     }
     case 'globalModeShortcut': {
       return globalShortcut.register(newShortcut, async () => {
-        await patchControledMihomoConfig({ mode: 'global' })
-        await patchMihomoConfig({ mode: 'global' })
-        new Notification({
-          title: '已切换至全局模式'
-        }).show()
-        mainWindow?.webContents.send('controledMihomoConfigUpdated')
-        ipcMain.emit('updateTrayMenu')
+        try {
+          // Update proxy state
+          const { setXboardProxyState } = await import('../config/xboard')
+          setXboardProxyState({ mode: 'global' })
+          
+          // Update config files
+          await patchControledMihomoConfig({ mode: 'global' }, false)
+          
+          // Hot-reload via API (no restart, no reconnection, empty rules for global mode)
+          await patchMihomoConfig({ mode: 'global', rules: [] })
+          new Notification({
+            title: '已切换至全局模式'
+          }).show()
+          mainWindow?.webContents.send('controledMihomoConfigUpdated')
+          ipcMain.emit('updateTrayMenu')
+        } catch (error) {
+          console.error('[Shortcut] Failed to switch to global mode:', error)
+        }
       })
     }
     case 'directModeShortcut': {
       return globalShortcut.register(newShortcut, async () => {
-        await patchControledMihomoConfig({ mode: 'direct' })
-        await patchMihomoConfig({ mode: 'direct' })
-        new Notification({
-          title: '已切换至直连模式'
-        }).show()
-        mainWindow?.webContents.send('controledMihomoConfigUpdated')
-        ipcMain.emit('updateTrayMenu')
+        try {
+          // Update proxy state
+          const { setXboardProxyState } = await import('../config/xboard')
+          setXboardProxyState({ mode: 'direct' })
+          
+          // Update config files
+          await patchControledMihomoConfig({ mode: 'direct' }, false)
+          
+          // Hot-reload via API (no restart, no reconnection)
+          await patchMihomoConfig({ mode: 'direct', rules: [] })
+          new Notification({
+            title: '已切换至直连模式'
+          }).show()
+          mainWindow?.webContents.send('controledMihomoConfigUpdated')
+          ipcMain.emit('updateTrayMenu')
+        } catch (error) {
+          console.error('[Shortcut] Failed to switch to direct mode:', error)
+        }
       })
     }
     case 'quitWithoutCoreShortcut': {
