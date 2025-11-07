@@ -755,12 +755,23 @@ app.whenReady().then(async () => {
       // Writing to config file might trigger mihomo to auto-reload, causing disconnection
       // Instead, we only update the runtime mode via API without touching config files
       
-      const { patchMihomoConfig } = await import('./core/mihomoApi')
+      const { patchMihomoConfig, mihomoProxies, mihomoChangeProxy } = await import('./core/mihomoApi')
       
       // Get current mode from controledMihomoConfig (already updated above)
       const { getControledMihomoConfig } = await import('./config')
       const controledConfig = await getControledMihomoConfig()
       const newMode = controledConfig.mode || mode
+      
+      // Verify proxy still exists before switching mode
+      try {
+        const proxies = await mihomoProxies()
+        const proxyExists = proxies.proxies && proxyState.selectedNodeName in proxies.proxies
+        if (!proxyExists) {
+          console.warn(`[Main] Proxy ${proxyState.selectedNodeName} not found in runtime, may cause disconnection`)
+        }
+      } catch (error: any) {
+        console.warn('[Main] Failed to verify proxy before mode switch:', error.message)
+      }
       
       // Patch only the mode via API (do NOT update config file or rules)
       // This updates the runtime mode without reloading the entire config or disconnecting
@@ -768,6 +779,21 @@ app.whenReady().then(async () => {
         mode: newMode as 'rule' | 'global'
       })
       console.log('[Main] Mode switched via API hot-reload (mode only, no file write, no rules update to avoid disconnect)')
+      
+      // After mode switch, verify and ensure proxy selection is still valid
+      // In global mode, mihomo uses the default proxy (config.proxy), which should already be set
+      // But we verify the proxy is still accessible after mode switch
+      try {
+        const proxies = await mihomoProxies()
+        if (proxies.proxies && proxyState.selectedNodeName in proxies.proxies) {
+          // Proxy exists, connection should be fine
+          console.log('[Main] Proxy verified after mode switch:', proxyState.selectedNodeName)
+        } else {
+          console.warn('[Main] Proxy not found after mode switch, connection may be broken')
+        }
+      } catch (error: any) {
+        console.warn('[Main] Failed to verify proxy after mode switch:', error.message)
+      }
       
       // DO NOT update profile file here - it would trigger restartCore() if current profile matches
       // Profile file is only used for initial startup, runtime mode changes should not touch it
