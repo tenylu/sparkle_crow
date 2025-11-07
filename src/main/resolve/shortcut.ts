@@ -81,31 +81,21 @@ export async function registerShortcut(
       return globalShortcut.register(newShortcut, async () => {
         try {
           // Update proxy state
-          const { setXboardProxyState, getXboardProxyState } = await import('../config/xboard')
+          const { setXboardProxyState } = await import('../config/xboard')
           setXboardProxyState({ mode: 'rule' })
           
           // Update config files
           await patchControledMihomoConfig({ mode: 'rule' }, false)
           
-          // Get proxy state to build rules
-          const proxyState = getXboardProxyState()
+          // Use the same hot-reload logic as xboard:switchMode
+          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
+          await generateProfile()
+          const runtimeConfig = await getRuntimeConfig()
           
-          // Build rules for rule mode
-          let rules: string[] = []
-          if (proxyState?.selectedNodeName) {
-            rules = [
-              'DOMAIN-SUFFIX,local,DIRECT',
-              'IP-CIDR,127.0.0.0/8,DIRECT',
-              'IP-CIDR,172.16.0.0/12,DIRECT',
-              'IP-CIDR,192.168.0.0/16,DIRECT',
-              'IP-CIDR,10.0.0.0/8,DIRECT',
-              'GEOIP,CN,DIRECT',
-              `MATCH,${proxyState.selectedNodeName}`
-            ]
-          }
-          
-          // Hot-reload via API (no restart, no reconnection)
-          await patchMihomoConfig({ mode: 'rule', rules: rules })
+          // Patch only the mode via API (do NOT update rules, as that would disconnect)
+          await patchMihomoConfig({
+            mode: runtimeConfig.mode as 'rule' | 'global'
+          })
           new Notification({
             title: '已切换至规则模式'
           }).show()
@@ -123,28 +113,25 @@ export async function registerShortcut(
           const { setXboardProxyState, getXboardProxyState } = await import('../config/xboard')
           setXboardProxyState({ mode: 'global' })
           
-          // Update config files
-          await patchControledMihomoConfig({ mode: 'global' }, false)
-          
-          // Get proxy state to build rules
+          // Verify proxy node exists
           const proxyState = getXboardProxyState()
           if (!proxyState?.selectedNodeName) {
             console.error('[Shortcut] No proxy selected for global mode')
             return
           }
           
-          // Global mode: all traffic goes through proxy (only local traffic is direct)
-          const rules = [
-            'DOMAIN-SUFFIX,local,DIRECT',
-            'IP-CIDR,127.0.0.0/8,DIRECT',
-            'IP-CIDR,172.16.0.0/12,DIRECT',
-            'IP-CIDR,192.168.0.0/16,DIRECT',
-            'IP-CIDR,10.0.0.0/8,DIRECT',
-            `MATCH,${proxyState.selectedNodeName}`
-          ]
+          // Update config files
+          await patchControledMihomoConfig({ mode: 'global' }, false)
           
-          // Hot-reload via API (no restart, no reconnection)
-          await patchMihomoConfig({ mode: 'global', rules: rules })
+          // Use the same hot-reload logic as xboard:switchMode
+          const { generateProfile, getRuntimeConfig } = await import('../core/factory')
+          await generateProfile()
+          const runtimeConfig = await getRuntimeConfig()
+          
+          // Patch only the mode via API (do NOT update rules, as that would disconnect)
+          await patchMihomoConfig({
+            mode: runtimeConfig.mode as 'rule' | 'global'
+          })
           new Notification({
             title: '已切换至全局模式'
           }).show()
