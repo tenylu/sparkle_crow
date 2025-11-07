@@ -764,19 +764,18 @@ app.whenReady().then(async () => {
       }
       
       // Hot-reload mode via API (this does NOT restart the core or disconnect)
+      // IMPORTANT: Only update runtime config via API, do NOT update profile file
+      // Profile file update would trigger restartCore() in setProfileStr() if it's the current profile
+      // Mode switching should only change runtime behavior, not require restart
       await patchMihomoConfig({
         mode: mode as 'rule' | 'global',
         rules: rules
       })
-      console.log('[Main] Mode switched via API hot-reload successfully (no restart)')
+      console.log('[Main] Mode switched via API hot-reload successfully (no restart, no file update)')
       
-      // Update profile file in background (for consistency, but not required for immediate operation)
-      const profileId = 'xboard-vpn'
-      const unifiedConfig = await buildXboardConfig()
-      const configStr = stringifyYaml(unifiedConfig)
-      const { setProfileStr } = await import('./config')
-      await setProfileStr(profileId, configStr)
-      console.log('[Main] Profile updated with unified config')
+      // DO NOT update profile file here - it would trigger restartCore() if current profile matches
+      // Profile file is only used for initial startup, runtime mode changes should not touch it
+      // The controledMihomoConfig and proxyState are already updated, which is sufficient
       
       // Notify frontend of config update
       mainWindow?.webContents.send('controledMihomoConfigUpdated')
