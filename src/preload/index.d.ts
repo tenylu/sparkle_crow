@@ -15,7 +15,7 @@ declare global {
         listLanIPs: () => Promise<{ ips: Array<{ ip: string, interface: string, family: 'IPv4' | 'IPv6', isPrivate?: boolean, isULA?: boolean }> }>
       }
       xboard: {
-        login: (baseURL: string, email: string, password: string) => Promise<{ success: boolean, token: string }>
+        login: (baseURL: string, email: string, password: string) => Promise<{ success: boolean, token?: string, baseURL?: string, error?: string }>
         logout: () => Promise<{ success: boolean }>
         getUserInfo: () => Promise<UserInfo>
         getSubscribe: () => Promise<SubscribeInfo>

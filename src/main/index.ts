@@ -261,72 +261,196 @@ app.whenReady().then(async () => {
   const { showFloatingWindow: showFloating = false, disableTray = false } = await getAppConfig()
   registerIpcMainHandlers()
   
+  const loginAttemptTracker = new Map<string, { count: number; blockedUntil?: number }>()
+
   // Register Xboard IPC handlers
   ipcMain.handle('xboard:login', async (_event, baseURL: string, email: string, password: string) => {
+    const identifier = (email || '').trim().toLowerCase()
+    const now = Date.now()
+
+    const tracker = loginAttemptTracker.get(identifier)
+    if (tracker?.blockedUntil && tracker.blockedUntil > now) {
+      return { success: false, error: '密码错误次数过多，请在 15 分钟后再试' }
+    }
+    if (tracker?.blockedUntil && tracker.blockedUntil <= now) {
+      loginAttemptTracker.set(identifier, { count: 0 })
+    }
+
     try {
-      const client = new XboardClient(baseURL)
-      const authToken = await client.login({ email, password })
+      // Get previously used domain from config as preferred
+      const config = getXboardConfig()
+      const preferredDomain = config?.baseURL || baseURL
+      
+      // Try login with domain fallback
+      const { token: authToken, baseURL: workingBaseURL } = await XboardClient.loginWithDomainFallback(
+        { email, password },
+        preferredDomain
+      )
+      
       console.log('[Main] Login successful, saving token:', authToken.substring(0, 20) + '...')
-      setXboardConfig({ baseURL, token: authToken, email })
-      return { success: true, token: authToken }
+      console.log('[Main] Using baseURL:', workingBaseURL)
+      if (identifier) {
+        loginAttemptTracker.delete(identifier)
+      }
+      setXboardConfig({ baseURL: workingBaseURL, token: authToken, email })
+      return { success: true, token: authToken, baseURL: workingBaseURL }
     } catch (error: any) {
-      console.error('[Main] Login failed:', error.message)
-      throw new Error(error.message || 'Login failed')
+      // Extract only the Chinese message from the error
+      // Get message from response data first, then from error message
+      let errorMessage = error?.response?.data?.message || error?.message || '登录失败'
+      
+      // Remove any English error prefixes that might be in the message
+      errorMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .replace(/at\s+.*/g, '') // Remove stack trace
+        .trim()
+      
+      // Ensure we have a message
+      if (!errorMessage || errorMessage.length === 0) {
+        errorMessage = '登录失败'
+      }
+      
+      // Return error object instead of throwing to avoid Electron's automatic error logging
+      // This prevents "Error occurred in handler for 'xboard:login':" from appearing in console
+      // Only log to console in development mode
+      const passwordErrorRegex = /(邮箱或密码错误|密码错误|密码必须|密码错误次数过多)/
+      if (passwordErrorRegex.test(errorMessage) && identifier) {
+        const attempt = loginAttemptTracker.get(identifier) ?? { count: 0 }
+        attempt.count += 1
+
+        // Server already indicates too many attempts – treat as limit immediately
+        if (errorMessage.includes('密码错误次数过多')) {
+          attempt.count = Math.max(attempt.count, 5)
+          attempt.blockedUntil = now + 15 * 60 * 1000
+          loginAttemptTracker.set(identifier, attempt)
+          return { success: false, error: '密码错误次数过多，请在 15 分钟后再试' }
+        }
+
+        if (attempt.count >= 5) {
+          attempt.blockedUntil = now + 15 * 60 * 1000
+          loginAttemptTracker.set(identifier, attempt)
+          return { success: false, error: '密码错误次数过多，请在 15 分钟后再试' }
+        }
+
+        loginAttemptTracker.set(identifier, attempt)
+      }
+
+      return { success: false, error: errorMessage }
     }
   })
 
   ipcMain.handle('xboard:sendRegisterCode', async (_event, baseURL: string, email: string) => {
     try {
-      const client = new XboardClient(baseURL)
-      await client.sendEmailVerify(email)
-      return { success: true }
+      const config = getXboardConfig()
+      const preferredDomain = config?.baseURL || baseURL
+      
+      const { baseURL: workingBaseURL } = await XboardClient.executeWithDomainFallback(
+        async (domain) => {
+          const client = new XboardClient(domain)
+          await client.sendEmailVerify(email)
+          return true
+        },
+        preferredDomain
+      )
+      
+      console.log('[Main] Send register code successful on:', workingBaseURL)
+      return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
       console.error('[Main] Send register code failed:', error.message)
-      throw new Error(error.message || 'Failed to send verification code')
+      const errorMessage = error.message || '发送验证码失败'
+      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .trim()
+      throw new Error(cleanMessage)
     }
   })
 
   ipcMain.handle('xboard:register', async (_event, baseURL: string, email: string, password: string, inviteCode: string, emailCode: string) => {
     try {
-      const client = new XboardClient(baseURL)
-      await client.register({
-        email,
-        password,
-        password_confirm: password, // V2Board API expects password_confirm
-        email_code: emailCode,
-        invite_code: inviteCode
-      })
-      return { success: true }
+      const config = getXboardConfig()
+      const preferredDomain = config?.baseURL || baseURL
+      
+      const { baseURL: workingBaseURL } = await XboardClient.executeWithDomainFallback(
+        async (domain) => {
+          const client = new XboardClient(domain)
+          await client.register({
+            email,
+            password,
+            password_confirm: password, // V2Board API expects password_confirm
+            email_code: emailCode,
+            invite_code: inviteCode
+          })
+          return true
+        },
+        preferredDomain
+      )
+      
+      console.log('[Main] Register successful on:', workingBaseURL)
+      return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
       console.error('[Main] Register failed:', error.message)
-      throw new Error(error.message || 'Registration failed')
+      const errorMessage = error.message || '注册失败'
+      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .trim()
+      throw new Error(cleanMessage)
     }
   })
 
   ipcMain.handle('xboard:sendResetCode', async (_event, baseURL: string, email: string) => {
     try {
-      const client = new XboardClient(baseURL)
-      await client.sendEmailVerify(email)
-      return { success: true }
+      const config = getXboardConfig()
+      const preferredDomain = config?.baseURL || baseURL
+      
+      const { baseURL: workingBaseURL } = await XboardClient.executeWithDomainFallback(
+        async (domain) => {
+          const client = new XboardClient(domain)
+          await client.sendEmailVerify(email)
+          return true
+        },
+        preferredDomain
+      )
+      
+      console.log('[Main] Send reset code successful on:', workingBaseURL)
+      return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
       console.error('[Main] Send reset code failed:', error.message)
-      throw new Error(error.message || 'Failed to send verification code')
+      const errorMessage = error.message || '发送验证码失败'
+      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .trim()
+      throw new Error(cleanMessage)
     }
   })
 
   ipcMain.handle('xboard:resetPassword', async (_event, baseURL: string, email: string, emailCode: string, password: string) => {
     try {
-      const client = new XboardClient(baseURL)
-      await client.resetPassword({
-        email,
-        email_code: emailCode,
-        password,
-        password_confirm: password // V2Board API expects password_confirm
-      })
-      return { success: true }
+      const config = getXboardConfig()
+      const preferredDomain = config?.baseURL || baseURL
+      
+      const { baseURL: workingBaseURL } = await XboardClient.executeWithDomainFallback(
+        async (domain) => {
+          const client = new XboardClient(domain)
+          await client.resetPassword({
+            email,
+            email_code: emailCode,
+            password,
+            password_confirm: password // V2Board API expects password_confirm
+          })
+          return true
+        },
+        preferredDomain
+      )
+      
+      console.log('[Main] Reset password successful on:', workingBaseURL)
+      return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
       console.error('[Main] Reset password failed:', error.message)
-      throw new Error(error.message || 'Password reset failed')
+      const errorMessage = error.message || '重置密码失败'
+      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .trim()
+      throw new Error(cleanMessage)
     }
   })
   
@@ -367,13 +491,24 @@ app.whenReady().then(async () => {
     try {
       const config = getXboardConfig()
       console.log('[Main] getSubscribe - config:', config)
-      if (!config?.baseURL || !config?.token) {
+      if (!config?.token) {
         throw new Error('Not logged in')
       }
-      const client = new XboardClient(config.baseURL)
-      client.setAuthToken(config.token)
-      console.log('[Main] Created client, token set:', !!config.token)
-      return await client.getSubscribe()
+      
+      // Use domain fallback to get subscribe
+      const preferredDomain = config?.baseURL
+      const { subscribe, baseURL: workingBaseURL } = await XboardClient.getSubscribeWithDomainFallback(
+        config.token,
+        preferredDomain
+      )
+      
+      // Update config with working baseURL if it changed
+      if (workingBaseURL !== config.baseURL) {
+        console.log('[Main] Updated baseURL from', config.baseURL, 'to', workingBaseURL)
+        setXboardConfig({ baseURL: workingBaseURL })
+      }
+      
+      return subscribe
     } catch (error: any) {
       console.error('[Main] getSubscribe error:', error.message)
       throw error
@@ -468,14 +603,23 @@ app.whenReady().then(async () => {
   ipcMain.handle('xboard:getNodes', async () => {
     try {
       const config = getXboardConfig()
-      if (!config?.baseURL || !config?.token) {
+      if (!config?.token) {
         throw new Error('Not logged in')
       }
-      const client = new XboardClient(config.baseURL)
-      client.setAuthToken(config.token)
       
-      console.log('[Main] Getting subscribe info...')
-      const subscribe = await client.getSubscribe()
+      // Use domain fallback to get subscribe
+      const preferredDomain = config?.baseURL
+      const { subscribe, baseURL: workingBaseURL } = await XboardClient.getSubscribeWithDomainFallback(
+        config.token,
+        preferredDomain
+      )
+      
+      // Update config with working baseURL if it changed
+      if (workingBaseURL !== config.baseURL) {
+        console.log('[Main] Updated baseURL from', config.baseURL, 'to', workingBaseURL)
+        setXboardConfig({ baseURL: workingBaseURL })
+      }
+      
       console.log('[Main] Subscribe URL:', subscribe.subscribe_url)
       
       // Fetch and parse the actual subscribe
@@ -544,15 +688,23 @@ app.whenReady().then(async () => {
       console.log('[Main] Connecting to node:', nodeName, 'mode:', mode)
       
       const config = getXboardConfig()
-      if (!config?.baseURL || !config?.token) {
+      if (!config?.token) {
         throw new Error('Not logged in')
       }
       
-      const client = new XboardClient(config.baseURL)
-      client.setAuthToken(config.token)
+      // Use domain fallback to get subscribe
+      const preferredDomain = config.baseURL
+      const { subscribe, baseURL: workingBaseURL } = await XboardClient.getSubscribeWithDomainFallback(
+        config.token,
+        preferredDomain
+      )
       
-      // Get subscribe info
-      const subscribe = await client.getSubscribe()
+      // Update config with working baseURL if it changed
+      if (workingBaseURL !== config.baseURL) {
+        console.log('[Main] Updated baseURL from', config.baseURL, 'to', workingBaseURL)
+        setXboardConfig({ baseURL: workingBaseURL })
+      }
+      
       const yamlText = await fetchSubscribe(subscribe.subscribe_url)
       
       // Parse YAML to find the selected node
@@ -832,14 +984,23 @@ app.whenReady().then(async () => {
       
       // Get subscription and create new config with new node
       const config = getXboardConfig()
-      if (!config?.baseURL || !config?.token) {
+      if (!config?.token) {
         throw new Error('Not logged in')
       }
       
-      const client = new XboardClient(config.baseURL)
-      client.setAuthToken(config.token)
+      // Use domain fallback to get subscribe
+      const preferredDomain = config.baseURL
+      const { subscribe, baseURL: workingBaseURL } = await XboardClient.getSubscribeWithDomainFallback(
+        config.token,
+        preferredDomain
+      )
       
-      const subscribe = await client.getSubscribe()
+      // Update config with working baseURL if it changed
+      if (workingBaseURL !== config.baseURL) {
+        console.log('[Main] Updated baseURL from', config.baseURL, 'to', workingBaseURL)
+        setXboardConfig({ baseURL: workingBaseURL })
+      }
+      
       const yamlText = await fetchSubscribe(subscribe.subscribe_url)
       const doc = YAML.parse(yamlText)
       

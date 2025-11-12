@@ -124,9 +124,27 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       const result = await window.api.xboard.login(baseURL, email, password)
       if (result.success) {
         onLoginSuccess?.()
+      } else if (result.error) {
+        // Handle error returned from IPC handler (not thrown)
+        setError(result.error)
       }
     } catch (err: any) {
-      setError(t('loginFailed'))
+      // Display detailed error message from backend
+      let errorMessage = err?.message || t('loginFailed')
+      
+      // Remove any English error prefixes that might be in the message
+      errorMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .replace(/at\s+.*/g, '') // Remove stack trace lines
+        .trim()
+      
+      // If message is empty after cleaning, use default
+      if (!errorMessage) {
+        errorMessage = t('loginFailed')
+      }
+      
+      setError(errorMessage)
+      console.error('[Login] Login error:', err)
     } finally {
       setLoading(false)
     }
@@ -417,11 +435,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       {/* Error toast at the top */}
       {error && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-xl px-4">
-          <div className="bg-red-500 text-white px-6 py-3 rounded-xl shadow-lg flex items-center space-x-3">
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="bg-red-500 text-white px-6 py-3 rounded-xl shadow-lg flex items-start space-x-3">
+            <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="font-medium flex-1 text-center">{error}</span>
+            <span className="font-medium flex-1 text-left whitespace-pre-line break-words">{error}</span>
             <button
               onClick={() => setError('')}
               className="hover:text-gray-200 flex-shrink-0"
