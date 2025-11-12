@@ -33,11 +33,12 @@ nsis:
   artifactName: ${name}-windows-${version}-${arch}-setup.${ext}
   installerIcon: build/installerIcon.ico
   uninstallDisplayName: ${productName}
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false
   oneClick: false
   perMachine: true
   createDesktopShortcut: true
   runAfterFinish: true
+  installDir: C:\Program Files\CrowVPN
 mac:
   target:
     - pkg

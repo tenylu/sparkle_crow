@@ -4,11 +4,11 @@ import type { LoginRequest, LoginResponse, UserInfo, SubscribeInfo, AuthError } 
 /**
  * List of available server domains to try
  * Order matters: first domain will be tried first
+ * For subscribe URL, default to api.crowmesh.com, fallback to others on failure
  */
 export const XBOARD_SERVER_DOMAINS = [
-  'https://xb.crowmesh.com',
-  'https://user.crowmesh.com',
   'https://api.crowmesh.com',
+  'https://xb.crowmesh.com',
   'https://user.koalaid.com',
   'http://v3.koalaid.com',
 ]
@@ -550,9 +550,12 @@ export class XboardClient {
     token: string,
     preferredDomain?: string
   ): Promise<{ subscribe: SubscribeInfo; baseURL: string }> {
-    const domainsToTry = preferredDomain 
-      ? [preferredDomain, ...XBOARD_SERVER_DOMAINS.filter(d => d !== preferredDomain)]
-      : XBOARD_SERVER_DOMAINS
+    // For subscribe, always prioritize api.crowmesh.com first
+    const apiDomain = 'https://api.crowmesh.com'
+    const fallbackDomains = XBOARD_SERVER_DOMAINS.filter(d => d !== apiDomain)
+    const domainsToTry = preferredDomain && preferredDomain !== apiDomain
+      ? [apiDomain, preferredDomain, ...fallbackDomains.filter(d => d !== preferredDomain)]
+      : [apiDomain, ...fallbackDomains]
 
     let lastError: Error | null = null
 
@@ -563,6 +566,33 @@ export class XboardClient {
         client.setAuthToken(token)
         
         const subscribe = await client.getSubscribe()
+        
+        // Replace user.crowmesh.com with api.crowmesh.com in subscribe_url if present
+        if (subscribe.subscribe_url) {
+          const originalUrl = subscribe.subscribe_url
+          // Replace all occurrences of user.crowmesh.com with api.crowmesh.com
+          // Handle both http and https, with or without port numbers
+          // Pattern: http:// or https:// followed by user.crowmesh.com (with optional port)
+          subscribe.subscribe_url = subscribe.subscribe_url.replace(
+            /https?:\/\/(?:[^\/]*@)?user\.crowmesh\.com(?::\d+)?/gi,
+            (match) => {
+              // Preserve the protocol (http or https)
+              const protocol = match.startsWith('https') ? 'https' : 'http'
+              // Extract port if present
+              const portMatch = match.match(/:(\d+)/)
+              const port = portMatch ? `:${portMatch[1]}` : ''
+              return `${protocol}://api.crowmesh.com${port}`
+            }
+          )
+          
+          if (originalUrl !== subscribe.subscribe_url) {
+            console.log(`[XboardClient] Replaced user.crowmesh.com with api.crowmesh.com in subscribe_url`)
+            console.log(`[XboardClient] Original URL: ${originalUrl}`)
+            console.log(`[XboardClient] New URL: ${subscribe.subscribe_url}`)
+          } else {
+            console.log(`[XboardClient] Subscribe URL does not contain user.crowmesh.com: ${originalUrl}`)
+          }
+        }
         
         console.log(`[XboardClient] Get subscribe successful on domain: ${domain}`)
         return { subscribe, baseURL: domain }

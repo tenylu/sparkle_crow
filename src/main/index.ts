@@ -23,10 +23,10 @@ import { init } from './utils/init'
 import { join } from 'path'
 import { initShortcut } from './resolve/shortcut'
 import { execSync, spawn } from 'child_process'
-import { createElevateTaskSync } from './sys/misc'
+import { createElevateTaskSync, isWindowsAdmin } from './sys/misc'
 import { initProfileUpdater } from './core/profileUpdater'
 import { existsSync, writeFileSync } from 'fs'
-import { exePath, taskDir } from './utils/dirs'
+import { exePath, taskDir, appConfigPath } from './utils/dirs'
 import path from 'path'
 import { startMonitor } from './resolve/trafficMonitor'
 import { showFloatingWindow } from './resolve/floatingWindow'
@@ -53,12 +53,25 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason)
 })
 
+// Check if this is first launch (config file doesn't exist)
+const isFirstLaunch = !existsSync(appConfigPath())
+
 if (
   process.platform === 'win32' &&
   !is.dev &&
   !process.argv.includes('noadmin') &&
   syncConfig.corePermissionMode === 'elevated'
 ) {
+  // On first launch, check if running as admin
+  if (isFirstLaunch && !isWindowsAdmin()) {
+    dialog.showErrorBox(
+      '首次启动需要管理员权限',
+      'CrowVPN 首次启动需要管理员权限以完成初始化设置。\n\n请右键点击 CrowVPN 图标，选择"以管理员身份运行"。\n\n或者：\n1. 找到 CrowVPN 安装目录\n2. 右键点击 CrowVPN.exe\n3. 选择"以管理员身份运行"'
+    )
+    app.exit()
+    process.exit(0)
+  }
+  
   try {
     createElevateTaskSync()
   } catch (createError) {

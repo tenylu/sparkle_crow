@@ -117,7 +117,7 @@ export const buildContextMenu = async (): Promise<Menu> => {
   const contextMenu = [
     {
       id: 'status',
-      label: connectionStatus ? '状态：已连接' : '状态：未连接',
+      label: connectionStatus ? '🟢 已连接' : '🔴 未连接',
       type: 'normal',
       enabled: false
     },

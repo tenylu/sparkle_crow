@@ -134,6 +134,23 @@ export async function checkElevateTask(): Promise<boolean> {
   }
 }
 
+/**
+ * Check if the current process is running with administrator privileges on Windows
+ */
+export function isWindowsAdmin(): boolean {
+  if (process.platform !== 'win32') {
+    return false
+  }
+  try {
+    // Use net session command to check admin privileges
+    // This command requires admin rights and will fail if not admin
+    execSync('net session', { stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function resetAppConfig(): void {
   if (process.platform === 'win32') {
     spawn(
