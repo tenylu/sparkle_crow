@@ -38,7 +38,6 @@ nsis:
   perMachine: true
   createDesktopShortcut: true
   runAfterFinish: true
-  installDir: C:\Program Files\CrowVPN
 mac:
   target:
     - pkg
