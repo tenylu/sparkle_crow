@@ -129,25 +129,32 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setError(result.error)
       }
     } catch (err: any) {
-      // Display detailed error message from backend
-      let errorMessage = err?.message || t('loginFailed')
-      
-      // Remove any English error prefixes that might be in the message
-      errorMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .replace(/at\s+.*/g, '') // Remove stack trace lines
-        .trim()
-      
-      // If message is empty after cleaning, use default
-      if (!errorMessage) {
-        errorMessage = t('loginFailed')
-      }
-      
+      const errorMessage = resolveErrorMessage(err, t('loginFailed'))
       setError(errorMessage)
       console.error('[Login] Login error:', err)
     } finally {
       setLoading(false)
     }
+  }
+
+  const sanitizeMessage = (message: string | undefined, fallback: string): string => {
+    if (!message) return fallback
+    const cleaned = message
+      .replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+      .replace(/^Error:\s*/i, '')
+      .replace(/at\s+.*/g, '')
+      .trim()
+    return cleaned || fallback
+  }
+
+  const resolveErrorMessage = (err: unknown, fallback: string): string => {
+    if (!err) return fallback
+    if (typeof err === 'string') return sanitizeMessage(err, fallback)
+    if (err instanceof Error) return sanitizeMessage(err.message, fallback)
+    if (typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string') {
+      return sanitizeMessage((err as any).message, fallback)
+    }
+    return fallback
   }
 
   const handleSendVerifyCode = async () => {
@@ -156,13 +163,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       return
     }
 
-    setSendingVerifyCode(true)
     setError('')
+    setSendingVerifyCode(true)
     try {
-      await window.api.xboard.sendRegisterCode(baseURL, email)
-      setSuccess(t('codeSent'))
+      const result = await window.api.xboard.sendRegisterCode(baseURL, email)
+      if (result.success) {
+        setSuccess(t('codeSent'))
+      } else {
+        setError(sanitizeMessage(result.error, t('sendCodeFailed')))
+      }
     } catch (err: any) {
-      setError(t('sendCodeFailed'))
+      setError(resolveErrorMessage(err, t('sendCodeFailed')))
     } finally {
       setSendingVerifyCode(false)
     }
@@ -190,16 +201,20 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
     setLoading(true)
     try {
-      await window.api.xboard.register(baseURL, email, password, inviteCode, verifyCode)
-      setSuccess(t('registerSuccess'))
-      setTimeout(() => {
-        setViewMode('login')
-        setSuccess('')
-        setInviteCode('')
-        setVerifyCode('')
-      }, 2000)
+      const result = await window.api.xboard.register(baseURL, email, password, inviteCode, verifyCode)
+      if (result.success) {
+        setSuccess(t('registerSuccess'))
+        setTimeout(() => {
+          setViewMode('login')
+          setSuccess('')
+          setInviteCode('')
+          setVerifyCode('')
+        }, 2000)
+      } else {
+        setError(sanitizeMessage(result.error, t('registerFailed')))
+      }
     } catch (err: any) {
-      setError(t('registerFailed'))
+      setError(resolveErrorMessage(err, t('registerFailed')))
     } finally {
       setLoading(false)
     }
@@ -212,12 +227,15 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setLoading(true)
 
     try {
-      await window.api.xboard.sendResetCode(baseURL, email)
-      setSuccess(t('codeSent'))
-      // 显示验证码输入框
-      setResetCode('') // 设置为空字符串以触发显示验证码输入表单
+      const result = await window.api.xboard.sendResetCode(baseURL, email)
+      if (result.success) {
+        setSuccess(t('codeSent'))
+        setResetCode('')
+      } else {
+        setError(sanitizeMessage(result.error, t('resetFailed')))
+      }
     } catch (err: any) {
-      setError(t('resetFailed'))
+      setError(resolveErrorMessage(err, t('resetFailed')))
     } finally {
       setLoading(false)
     }
@@ -230,14 +248,18 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setLoading(true)
 
     try {
-      await window.api.xboard.resetPassword(baseURL, email, resetCode as string, newPassword)
-      setSuccess(t('resetSuccess'))
-      setTimeout(() => {
-        setViewMode('login')
-        setSuccess('')
-      }, 2000)
+      const result = await window.api.xboard.resetPassword(baseURL, email, resetCode as string, newPassword)
+      if (result.success) {
+        setSuccess(t('resetSuccess'))
+        setTimeout(() => {
+          setViewMode('login')
+          setSuccess('')
+        }, 2000)
+      } else {
+        setError(sanitizeMessage(result.error, t('resetFailed')))
+      }
     } catch (err: any) {
-      setError(t('resetFailed'))
+      setError(resolveErrorMessage(err, t('resetFailed')))
     } finally {
       setLoading(false)
     }

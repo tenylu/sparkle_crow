@@ -29,10 +29,10 @@ declare global {
         checkStatus: () => Promise<{ connected: boolean, ip: string, location: string }>
         setTun: (enable: boolean) => Promise<{ success: boolean, message?: string }>
         getTun: () => Promise<{ enable: boolean }>
-        sendRegisterCode: (baseURL: string, email: string) => Promise<{ success: boolean }>
-        register: (baseURL: string, email: string, password: string, inviteCode: string, emailCode: string) => Promise<{ success: boolean }>
-        sendResetCode: (baseURL: string, email: string) => Promise<{ success: boolean }>
-        resetPassword: (baseURL: string, email: string, emailCode: string, password: string) => Promise<{ success: boolean }>
+        sendRegisterCode: (baseURL: string, email: string) => Promise<{ success: boolean, baseURL?: string, error?: string }>
+        register: (baseURL: string, email: string, password: string, inviteCode: string, emailCode: string) => Promise<{ success: boolean, baseURL?: string, error?: string }>
+        sendResetCode: (baseURL: string, email: string) => Promise<{ success: boolean, baseURL?: string, error?: string }>
+        resetPassword: (baseURL: string, email: string, emailCode: string, password: string) => Promise<{ success: boolean, baseURL?: string, error?: string }>
       }
       ui: {
         openSupport: () => Promise<{ success: boolean; message?: string }>

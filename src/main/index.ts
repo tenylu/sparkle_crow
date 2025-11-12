@@ -263,6 +263,21 @@ app.whenReady().then(async () => {
   
   const loginAttemptTracker = new Map<string, { count: number; blockedUntil?: number }>()
 
+  function formatChineseError(error: any, defaultMessage: string): string {
+    let errorMessage = error?.response?.data?.message || error?.message || defaultMessage
+    errorMessage = errorMessage
+      ?.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
+      .replace(/^Error:\s*/i, '')
+      .replace(/at\s+.*/g, '')
+      .replace(/process\.processTicksAndRejections.*/g, '')
+      .replace(/async Session\.<anonymous>.*/g, '')
+      .trim()
+    if (!errorMessage) {
+      errorMessage = defaultMessage
+    }
+    return errorMessage
+  }
+
   // Register Xboard IPC handlers
   ipcMain.handle('xboard:login', async (_event, baseURL: string, email: string, password: string) => {
     const identifier = (email || '').trim().toLowerCase()
@@ -295,20 +310,7 @@ app.whenReady().then(async () => {
       setXboardConfig({ baseURL: workingBaseURL, token: authToken, email })
       return { success: true, token: authToken, baseURL: workingBaseURL }
     } catch (error: any) {
-      // Extract only the Chinese message from the error
-      // Get message from response data first, then from error message
-      let errorMessage = error?.response?.data?.message || error?.message || '登录失败'
-      
-      // Remove any English error prefixes that might be in the message
-      errorMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .replace(/at\s+.*/g, '') // Remove stack trace
-        .trim()
-      
-      // Ensure we have a message
-      if (!errorMessage || errorMessage.length === 0) {
-        errorMessage = '登录失败'
-      }
+      let errorMessage = formatChineseError(error, '登录失败')
       
       // Return error object instead of throwing to avoid Electron's automatic error logging
       // This prevents "Error occurred in handler for 'xboard:login':" from appearing in console
@@ -356,12 +358,11 @@ app.whenReady().then(async () => {
       console.log('[Main] Send register code successful on:', workingBaseURL)
       return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
-      console.error('[Main] Send register code failed:', error.message)
-      const errorMessage = error.message || '发送验证码失败'
-      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .trim()
-      throw new Error(cleanMessage)
+      const errorMessage = formatChineseError(error, '发送验证码失败')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Main] Send register code failed:', errorMessage)
+      }
+      return { success: false, error: errorMessage }
     }
   })
 
@@ -388,12 +389,11 @@ app.whenReady().then(async () => {
       console.log('[Main] Register successful on:', workingBaseURL)
       return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
-      console.error('[Main] Register failed:', error.message)
-      const errorMessage = error.message || '注册失败'
-      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .trim()
-      throw new Error(cleanMessage)
+      const errorMessage = formatChineseError(error, '注册失败')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Main] Register failed:', errorMessage)
+      }
+      return { success: false, error: errorMessage }
     }
   })
 
@@ -414,12 +414,11 @@ app.whenReady().then(async () => {
       console.log('[Main] Send reset code successful on:', workingBaseURL)
       return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
-      console.error('[Main] Send reset code failed:', error.message)
-      const errorMessage = error.message || '发送验证码失败'
-      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .trim()
-      throw new Error(cleanMessage)
+      const errorMessage = formatChineseError(error, '发送验证码失败')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Main] Send reset code failed:', errorMessage)
+      }
+      return { success: false, error: errorMessage }
     }
   })
 
@@ -445,12 +444,11 @@ app.whenReady().then(async () => {
       console.log('[Main] Reset password successful on:', workingBaseURL)
       return { success: true, baseURL: workingBaseURL }
     } catch (error: any) {
-      console.error('[Main] Reset password failed:', error.message)
-      const errorMessage = error.message || '重置密码失败'
-      const cleanMessage = errorMessage.replace(/^Error occurred in handler for.*?Error:\s*/i, '')
-        .replace(/^Error:\s*/i, '')
-        .trim()
-      throw new Error(cleanMessage)
+      const errorMessage = formatChineseError(error, '重置密码失败')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Main] Reset password failed:', errorMessage)
+      }
+      return { success: false, error: errorMessage }
     }
   })
   
