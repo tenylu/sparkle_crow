@@ -1387,11 +1387,11 @@ function showOverrideInstallConfirm(url: string, name?: string | null): Promise<
 export async function createWindow(): Promise<void> {
   const { useWindowFrame = false } = await getAppConfig()
   const { width: workWidth, height: workHeight } = screen.getPrimaryDisplay().workAreaSize
-  const baseWidth = 750
-  const baseHeight = 1200
+  const baseWidth = 430
+  const baseHeight = 750
   const scale = Math.min(workWidth / baseWidth, workHeight / baseHeight, 1)
-  const minWidth = Math.min(480, workWidth)
-  const minHeight = Math.min(720, workHeight)
+  const minWidth = Math.min(380, workWidth)
+  const minHeight = Math.min(640, workHeight)
   const scaledWidth = Math.round(baseWidth * scale)
   const scaledHeight = Math.round(baseHeight * scale)
   const defaultWidth = Math.min(Math.max(scaledWidth, minWidth), workWidth)
@@ -1404,8 +1404,14 @@ export async function createWindow(): Promise<void> {
   })
   const storedWidth = mainWindowState.width || defaultWidth
   const storedHeight = mainWindowState.height || defaultHeight
-  const windowWidth = Math.min(Math.max(storedWidth, minWidth), workWidth)
-  const windowHeight = Math.min(Math.max(storedHeight, minHeight), workHeight)
+  const windowWidth = Math.min(
+    Math.max(Math.min(storedWidth, defaultWidth), minWidth),
+    workWidth
+  )
+  const windowHeight = Math.min(
+    Math.max(Math.min(storedHeight, defaultHeight), minHeight),
+    workHeight
+  )
   // https://github.com/electron/electron/issues/16521#issuecomment-582955104
   if (process.platform === 'darwin') {
     await createApplicationMenu()

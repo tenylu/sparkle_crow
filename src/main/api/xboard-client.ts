@@ -7,8 +7,8 @@ import type { LoginRequest, LoginResponse, UserInfo, SubscribeInfo, AuthError } 
  * For subscribe URL, default to api.crowmesh.com, fallback to others on failure
  */
 export const XBOARD_SERVER_DOMAINS = [
-  'https://api.crowmesh.com',
   'https://xb.crowmesh.com',
+  'https://api.crowmesh.com',
   'https://user.koalaid.com',
   'http://v3.koalaid.com',
 ]
@@ -550,70 +550,37 @@ export class XboardClient {
     token: string,
     preferredDomain?: string
   ): Promise<{ subscribe: SubscribeInfo; baseURL: string }> {
-    // For subscribe, always prioritize api.crowmesh.com first
-    const apiDomain = 'https://api.crowmesh.com'
-    const fallbackDomains = XBOARD_SERVER_DOMAINS.filter(d => d !== apiDomain)
-    const domainsToTry = preferredDomain && preferredDomain !== apiDomain
-      ? [apiDomain, preferredDomain, ...fallbackDomains.filter(d => d !== preferredDomain)]
-      : [apiDomain, ...fallbackDomains]
+    // Default domain now points to xb.crowmesh.com
+    const domain = (preferredDomain || 'https://xb.crowmesh.com').replace(/\/$/, '')
 
-    let lastError: Error | null = null
+    console.log('[XboardClient] Getting subscribe using single domain:', domain)
 
-    for (const domain of domainsToTry) {
-      try {
-        console.log(`[XboardClient] Attempting to get subscribe from: ${domain}`)
-        const client = new XboardClient(domain)
-        client.setAuthToken(token)
-        
-        const subscribe = await client.getSubscribe()
-        
-        // Replace user.crowmesh.com with api.crowmesh.com in subscribe_url if present
-        if (subscribe.subscribe_url) {
-          const originalUrl = subscribe.subscribe_url
-          // Replace all occurrences of user.crowmesh.com with api.crowmesh.com
-          // Handle both http and https, with or without port numbers
-          // Pattern: http:// or https:// followed by user.crowmesh.com (with optional port)
-          subscribe.subscribe_url = subscribe.subscribe_url.replace(
-            /https?:\/\/(?:[^\/]*@)?user\.crowmesh\.com(?::\d+)?/gi,
-            (match) => {
-              // Preserve the protocol (http or https)
-              const protocol = match.startsWith('https') ? 'https' : 'http'
-              // Extract port if present
-              const portMatch = match.match(/:(\d+)/)
-              const port = portMatch ? `:${portMatch[1]}` : ''
-              return `${protocol}://api.crowmesh.com${port}`
-            }
-          )
-          
-          if (originalUrl !== subscribe.subscribe_url) {
-            console.log(`[XboardClient] Replaced user.crowmesh.com with api.crowmesh.com in subscribe_url`)
-            console.log(`[XboardClient] Original URL: ${originalUrl}`)
-            console.log(`[XboardClient] New URL: ${subscribe.subscribe_url}`)
-          } else {
-            console.log(`[XboardClient] Subscribe URL does not contain user.crowmesh.com: ${originalUrl}`)
-          }
+    const client = new XboardClient(domain)
+    client.setAuthToken(token)
+
+    const subscribe = await client.getSubscribe()
+
+    // Replace user.crowmesh.com with user.koalaid.com in subscribe_url if present
+    if (subscribe.subscribe_url) {
+      const originalUrl = subscribe.subscribe_url
+      subscribe.subscribe_url = subscribe.subscribe_url.replace(
+        /https?:\/\/(?:[^\/]*@)?user\.crowmesh\.com(?::\d+)?/gi,
+        (match) => {
+          const protocol = match.startsWith('https') ? 'https' : 'http'
+          const portMatch = match.match(/:(\d+)/)
+          const port = portMatch ? `:${portMatch[1]}` : ''
+          return `${protocol}://user.koalaid.com${port}`
         }
-        
-        console.log(`[XboardClient] Get subscribe successful on domain: ${domain}`)
-        return { subscribe, baseURL: domain }
-      } catch (error: any) {
-        lastError = error
-        console.log(`[XboardClient] Get subscribe failed on ${domain}:`, error.message)
-        
-        // If server is reachable (got response or auth error), don't try other domains
-        if (this.isServerReachable(error)) {
-          console.log(`[XboardClient] Server ${domain} is reachable, stopping domain fallback`)
-          throw error
-        }
-        
-        // Continue to next domain only for network errors
-        console.log(`[XboardClient] Network error on ${domain}, trying next domain...`)
-        continue
+      )
+
+      if (originalUrl !== subscribe.subscribe_url) {
+        console.log('[XboardClient] Replaced user.crowmesh.com with user.koalaid.com in subscribe_url')
+        console.log('[XboardClient] Original URL:', originalUrl)
+        console.log('[XboardClient] New URL:', subscribe.subscribe_url)
       }
     }
 
-    // If we get here, all domains failed with network errors
-    throw lastError || new Error('无法连接到任何服务器获取订阅信息。请检查网络连接。')
+    return { subscribe, baseURL: domain }
   }
 
   async logout(): Promise<void> {

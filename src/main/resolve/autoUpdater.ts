@@ -1,4 +1,4 @@
-import axios, { AxiosRequestConfig, CancelTokenSource } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig, CancelTokenSource } from 'axios'
 import { parseYaml } from '../utils/yaml'
 import { app, shell, dialog } from 'electron'
 import { getAppConfig, getControledMihomoConfig } from '../config'
@@ -27,30 +27,15 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     
     console.log('[AutoUpdater] Checking for updates from:', url)
     
-    const res = await axios.get(url, {
-      headers: { 'Content-Type': 'application/octet-stream' },
-      ...(mixedPort != 0 && {
-        proxy: {
-          protocol: 'http',
-          host: '127.0.0.1',
-          port: mixedPort
-        }
-      }),
-      validateStatus: () => true,
-      responseType: 'text',
-      timeout: 10000
-    })
-    
-    // Check if request was successful
-    if (res.status !== 200 || !res.data) {
-      console.error('[AutoUpdater] Failed to fetch update info:', res.status, res.statusText)
+    const manifestText = await fetchUpdateManifest(url, mixedPort !== 0 ? mixedPort : null)
+    if (!manifestText) {
       return undefined
     }
-    
+
     // Parse YAML
     let latestVersionInfo: AppVersion
     try {
-      latestVersionInfo = parseYaml<AppVersion>(res.data)
+      latestVersionInfo = parseYaml<AppVersion>(manifestText)
       console.log('[AutoUpdater] Parsed update info:', latestVersionInfo)
     } catch (parseError) {
       console.error('[AutoUpdater] Failed to parse update info YAML:', parseError)
@@ -126,6 +111,79 @@ export async function checkUpdate(): Promise<AppVersion | undefined> {
     console.error('[AutoUpdater] Error checking for updates:', error.message)
     return undefined
   }
+}
+
+async function fetchUpdateManifest(url: string, proxyPort: number | null): Promise<string | undefined> {
+  const config: AxiosRequestConfig = {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    validateStatus: () => true,
+    responseType: 'text',
+    timeout: 10000
+  }
+
+  if (proxyPort && proxyPort > 0) {
+    config.proxy = {
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: proxyPort
+    }
+  } else {
+    config.proxy = false
+  }
+
+  try {
+    const res = await axios.get(url, config)
+    if (res.status !== 200 || !res.data) {
+      console.error(
+        `[AutoUpdater] Failed to fetch update info${proxyPort && proxyPort > 0 ? ' via proxy' : ''}:`,
+        res.status,
+        res.statusText
+      )
+      if (proxyPort && proxyPort > 0) {
+        console.warn('[AutoUpdater] Retrying update check without proxy')
+        return fetchUpdateManifest(url, null)
+      }
+      return undefined
+    }
+    return typeof res.data === 'string' ? res.data : String(res.data)
+  } catch (error: unknown) {
+    if (proxyPort && proxyPort > 0 && isLocalProxyConnectionError(error, proxyPort)) {
+      const message = (error as Error).message ?? ''
+      console.warn(
+        `[AutoUpdater] Proxy 127.0.0.1:${proxyPort} unavailable for update check (${message}), retrying without proxy`
+      )
+      return fetchUpdateManifest(url, null)
+    }
+    throw error
+  }
+}
+
+const LOCAL_PROXY_ERROR_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH'])
+
+function isLocalProxyConnectionError(error: unknown, proxyPort: number): boolean {
+  if (!axios.isAxiosError(error)) {
+    return false
+  }
+
+  const axiosError = error as AxiosError
+  const code = axiosError.code ?? ''
+  if (LOCAL_PROXY_ERROR_CODES.has(code)) {
+    return true
+  }
+
+  const message = axiosError.message ?? ''
+  if (message.includes('127.0.0.1') || message.includes('localhost') || message.includes(`:${proxyPort}`)) {
+    return true
+  }
+
+  const causeMessage =
+    axiosError.cause instanceof Error ? axiosError.cause.message ?? '' : typeof axiosError.cause === 'string' ? axiosError.cause : ''
+
+  if (typeof causeMessage === 'string' && causeMessage.length > 0) {
+    return causeMessage.includes('127.0.0.1') || causeMessage.includes('localhost') || causeMessage.includes(`:${proxyPort}`)
+  }
+
+  return false
 }
 
 export async function downloadAndInstallUpdate(version: string): Promise<void> {

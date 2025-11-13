@@ -1,4 +1,5 @@
 import os from 'os'
+import dns from 'dns'
 
 /**
  * 检查是否为私有IPv4地址 (RFC1918)
@@ -182,5 +183,21 @@ export function listLANIPs(): LANIPInfo[] {
   console.log(`[net.ts] Listed ${sorted.length} LAN IPs:`, sorted.map(i => i.ip).join(', '))
   
   return sorted
+}
+
+export async function resolveDomainIPs(host: string): Promise<string[]> {
+  try {
+    const results = await dns.promises.lookup(host, { all: true, verbatim: true })
+    const ips = new Set<string>()
+    for (const result of results) {
+      if (result?.address) {
+        ips.add(result.address)
+      }
+    }
+    return Array.from(ips)
+  } catch (error) {
+    console.warn('[net.ts] Failed to resolve domain IPs for', host, error)
+    return []
+  }
 }
 

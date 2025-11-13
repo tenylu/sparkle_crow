@@ -27,11 +27,11 @@ export const ProxyModeSelector: React.FC = () => {
 
   return (
     <div>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('proxyMode')}</p>
-      <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1.5">{t('proxyMode')}</p>
+      <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-0.5">
         <button
           onClick={() => handleModeChange('rule')}
-          className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-all ${
+          className={`flex-1 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
             proxyMode === 'rule'
               ? 'bg-blue-500 text-white shadow-sm hover:bg-blue-600 hover:opacity-90'
               : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-600 hover:opacity-80'
@@ -41,7 +41,7 @@ export const ProxyModeSelector: React.FC = () => {
         </button>
         <button
           onClick={() => handleModeChange('global')}
-          className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-all ${
+          className={`flex-1 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
             proxyMode === 'global'
               ? 'bg-blue-500 text-white shadow-sm hover:bg-blue-600 hover:opacity-90'
               : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-600 hover:opacity-80'

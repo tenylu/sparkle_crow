@@ -84,17 +84,17 @@ export const ConnectButton: React.FC = () => {
       onClick={handleConnect}
       disabled={isLoading || !selectedNode}
       className={`
-        relative w-72 h-72 rounded-full transition-all duration-700 transform hover:scale-105
+        relative w-56 h-56 rounded-full transition-all duration-500 transform hover:scale-105
         ${selectedNode
           ? isConnected
-            ? 'bg-gradient-to-br from-green-400 to-emerald-600 shadow-[0_0_80px_rgba(16,185,129,0.4)]'
+            ? 'bg-gradient-to-br from-green-400 to-emerald-600 shadow-[0_0_50px_rgba(16,185,129,0.35)]'
             : isDisconnecting
-            ? 'bg-gradient-to-br from-orange-400 to-red-500 shadow-[0_0_80px_rgba(249,115,22,0.4)]'
+            ? 'bg-gradient-to-br from-orange-400 to-red-500 shadow-[0_0_50px_rgba(249,115,22,0.35)]'
             : isConnecting
-            ? 'bg-gradient-to-br from-yellow-400 to-orange-500 shadow-[0_0_80px_rgba(251,191,36,0.4)]'
+            ? 'bg-gradient-to-br from-yellow-400 to-orange-500 shadow-[0_0_50px_rgba(251,191,36,0.35)]'
             : isDisabled
-            ? 'bg-gradient-to-br from-red-400 to-red-600 shadow-[0_0_80px_rgba(239,68,68,0.4)]'
-            : 'bg-gradient-to-br from-blue-400 to-indigo-600 shadow-[0_0_80px_rgba(59,130,246,0.4)]'
+            ? 'bg-gradient-to-br from-red-400 to-red-600 shadow-[0_0_50px_rgba(239,68,68,0.35)]'
+            : 'bg-gradient-to-br from-blue-400 to-indigo-600 shadow-[0_0_50px_rgba(59,130,246,0.35)]'
           : 'bg-gray-400 cursor-not-allowed opacity-50'
         }
         ${isLoading ? 'animate-pulse' : ''}
@@ -117,30 +117,34 @@ export const ConnectButton: React.FC = () => {
           </div>
         ) : isConnected ? (
           <div className="relative z-10">
-            <svg className="w-32 h-32 text-white animate-[breathing_3s_ease-in-out_infinite] origin-center" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-20 h-20 text-white animate-[breathing_3s_ease-in-out_infinite] origin-center" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
           </div>
         ) : (
-          <div className="relative w-full h-full flex items-center justify-center transition-all duration-300">
+          <div className="relative w-full h-full flex flex-col items-center justify-center space-y-3 transition-all duration-300">
             {/* Default pulse animation */}
             <div className="absolute inset-0 default-connection-pulse opacity-0 animate-[fadeIn_0.3s_ease-in-out_forwards]">
               <span></span>
             </div>
             {/* Lightning icon */}
             <div className="relative z-10 opacity-0 animate-[fadeIn_0.3s_ease-in-out_0.1s_forwards]">
-              <img src={lightningIcon} alt="Lightning" className="w-32 h-32 brightness-0 invert" />
+              <img src={lightningIcon} alt="Lightning" className="w-18 h-18 brightness-0 invert" />
+            </div>
+            {/* Hint text */}
+            <div className="relative z-10 opacity-0 animate-[fadeIn_0.3s_ease-in-out_0.15s_forwards] text-white text-sm font-semibold tracking-wide">
+              {t('clickToConnectHint')}
             </div>
           </div>
         )}
       </div>
       {!selectedNode && (
-        <div className="absolute bottom-12 left-0 right-0 text-center text-white text-lg font-semibold">
+        <div className="absolute bottom-10 left-0 right-0 text-center text-white text-base font-semibold">
           {t('selectNode')}
         </div>
       )}
       {selectedNode && isDisabled && (
-        <div className="absolute bottom-12 left-0 right-0 text-center text-white text-lg font-semibold">
+        <div className="absolute bottom-10 left-0 right-0 text-center text-white text-base font-semibold">
           {isExpired ? t('expired') : isTrafficExhausted ? t('trafficExhausted') : ''}
         </div>
       )}

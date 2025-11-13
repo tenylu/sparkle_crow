@@ -190,17 +190,60 @@ export async function buildXboardConfig(): Promise<any> {
   // Add panel IP and LAN ranges to TUN route-exclude if TUN is enabled
   if (config.tun?.enable) {
     try {
-      const { getBestLANIP } = await import('../utils/net')
+      const { getBestLANIP, resolveDomainIPs } = await import('../utils/net')
+      const { XBOARD_SERVER_DOMAINS } = await import('../api/xboard-client')
       const lanIP = getBestLANIP()
-      config.tun['route-exclude-address'] = ['127.0.0.1/32']
+      const routeExclude = new Set<string>(Array.isArray(config.tun['route-exclude-address']) ? config.tun['route-exclude-address'] : [])
+      routeExclude.add('127.0.0.1/32')
       if (lanIP && lanIP !== '127.0.0.1') {
-        config.tun['route-exclude-address'].push(`${lanIP}/32`)
+        routeExclude.add(`${lanIP}/32`)
         console.log('[Xboard Config] Added panel IP to TUN route-exclude:', lanIP)
       } else {
         console.log('[Xboard Config] Only localhost in TUN route-exclude')
       }
       // Add LAN ranges to prevent routing panel traffic through TUN
-      config.tun['route-exclude-address'].push('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')
+      routeExclude.add('10.0.0.0/8')
+      routeExclude.add('172.16.0.0/12')
+      routeExclude.add('192.168.0.0/16')
+
+      const bypassHosts = new Set<string>()
+      const xboardConfig = getXboardConfig()
+      if (xboardConfig?.baseURL) {
+        try {
+          const baseHost = new URL(xboardConfig.baseURL).hostname
+          if (baseHost) bypassHosts.add(baseHost)
+        } catch (error) {
+          console.warn('[Xboard Config] Failed to parse baseURL hostname', error)
+        }
+      }
+      XBOARD_SERVER_DOMAINS.forEach(domain => {
+        try {
+          const host = new URL(domain).hostname
+          if (host) bypassHosts.add(host)
+        } catch (error) {
+          console.warn('[Xboard Config] Failed to parse fallback domain hostname', domain, error)
+        }
+      })
+
+      for (const host of bypassHosts) {
+        try {
+          const ips = await resolveDomainIPs(host)
+          if (ips.length === 0) {
+            console.warn('[Xboard Config] No IPs resolved for bypass host:', host)
+          }
+          for (const ip of ips) {
+            if (ip.includes(':')) {
+              routeExclude.add(`${ip}/128`)
+            } else {
+              routeExclude.add(`${ip}/32`)
+            }
+          }
+        } catch (error) {
+          console.warn('[Xboard Config] Failed to resolve bypass host:', host, error)
+        }
+      }
+
+      config.tun['route-exclude-address'] = Array.from(routeExclude)
     } catch (error) {
       console.error('[Xboard Config] Failed to get LAN IP:', error)
       config.tun['route-exclude-address'] = ['127.0.0.1/32', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']

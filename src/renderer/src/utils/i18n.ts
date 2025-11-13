@@ -35,6 +35,7 @@ export const translations = {
     // Connect Button
     packageExpired: '套餐已到期，请续费后重试',
     trafficExhaustedAlert: '流量已用完，请购买流量后重试',
+    clickToConnectHint: '点击连接',
     
     // Node Selector grapes
     selectNode: '选择节点',
@@ -130,6 +131,8 @@ export const translations = {
     passwordMismatch: '密码不一致',
     codeSent: '验证码已发送，请查收邮箱',
     rememberMe: '记住我',
+    showPassword: '显示',
+    hidePassword: '隐藏',
     orWith: '或使用',
     signUp: '注册',
     dontHaveAccount: '还没有账号？',
@@ -177,6 +180,7 @@ export const translations = {
     // Connect Button
     packageExpired: 'Package expired, please renew',
     trafficExhaustedAlert: 'Traffic exhausted, please purchase more',
+    clickToConnectHint: 'Click to connect',
     
     // Node Selector
     selectNode: 'Select Node',
@@ -272,6 +276,8 @@ export const translations = {
     passwordMismatch: 'Passwords do not match',
     codeSent: 'Verification code sent, please check your email',
     rememberMe: 'Remember me',
+    showPassword: 'Show',
+    hidePassword: 'Hide',
     orWith: 'Or with',
     signUp: 'Sign Up',
     dontHaveAccount: 'Don\'t have an account?',

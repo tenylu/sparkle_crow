@@ -1176,138 +1176,105 @@ async function checkProfile(): Promise<void> {
   }
 }
 
+let manualGrantInProgress = false
+
 export async function manualGrantCorePermition(): Promise<void> {
   const { core = 'mihomo' } = await getAppConfig()
   const corePath = mihomoCorePath(core)
-  const execFilePromise = promisify(execFile)
-  
-  if (process.platform === 'darwin') {
-    console.log('[Manager] Granting permission for:', corePath)
-    
-    // Check if we're in a development environment (user directory)
-    const isDevEnvironment = corePath.includes('/Users/') && !corePath.startsWith('/Applications/')
-    
-    try {
-      // Escape the path for shell: replace backslashes, quotes, and special chars
-      const shellEscapedPath = corePath
-        .replace(/\\/g, '\\\\')  // Escape backslashes
-        .replace(/'/g, "'\\''")  // Escape single quotes: ' -> '\''
-        .replace(/\$/g, '\\$')    // Escape dollar signs
-        .replace(/`/g, '\\`')    // Escape backticks
-      
-      // Step 1: Try to remove quarantine attributes if present
-      // This might help with permission issues
-      try {
-        const removeQuarantineCmd = `xattr -d com.apple.quarantine '${shellEscapedPath}' 2>/dev/null || true`
-        const applescriptEscapedQuarantine = removeQuarantineCmd
-          .replace(/\\/g, '\\\\')
-          .replace(/"/g, '\\"')
-        const applescriptCommandQuarantine = `do shell script "${applescriptEscapedQuarantine}" with administrator privileges`
-        
-        await execFilePromise('osascript', [
-          '-e',
-          applescriptCommandQuarantine
-        ], {
-          timeout: 10000,
-          maxBuffer: 1024 * 1024
-        })
-        console.log('[Manager] Attempted to remove quarantine attributes')
-      } catch (quarantineError) {
-        // Ignore quarantine removal errors, it's not critical
-        console.log('[Manager] Quarantine removal skipped or failed (non-critical)')
-      }
-      
-      // Step 2: Try to set SUID bit
-      const chmodCommand = `chmod +sx '${shellEscapedPath}'`
-      const applescriptEscapedChmod = chmodCommand
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-      const applescriptCommandChmod = `do shell script "${applescriptEscapedChmod}" with administrator privileges`
-      
-      console.log('[Manager] Attempting to set SUID bit (chmod +sx)...')
-      
-      // Execute osascript using execFile to avoid shell interpretation
-      const { stdout: stdoutChmod, stderr: stderrChmod } = await execFilePromise('osascript', [
-        '-e',
-        applescriptCommandChmod
-      ], {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024
-      })
-      
-      if (stdoutChmod) {
-        console.log('[Manager] osascript stdout (chmod):', stdoutChmod)
-      }
-      if (stderrChmod && stderrChmod.trim()) {
-        console.warn('[Manager] osascript stderr (chmod):', stderrChmod)
-      }
-      
-      // Wait a moment for file system to sync
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Verify the permission was actually set
-      const hasPermission = await checkCorePermission()
-      if (hasPermission) {
-        console.log('[Manager] SUID bit set successfully')
-        return // Success!
-      }
-      
-      // If we're in dev environment and SUID failed, provide specific guidance
-      if (isDevEnvironment) {
-        throw new Error(`开发环境限制：无法在用户目录中设置 SUID 位。\n\n这是 macOS 系统完整性保护 (SIP) 的安全限制。即使在开发环境中，macOS 也会阻止在用户目录（如 ~/Documents）中设置 SUID 位。\n\n解决方案：\n1. 手动在终端中尝试（可能仍然失败）：\n   sudo chmod +sx "${corePath}"\n\n2. 在生产环境中（安装到 /Applications）：\n   - 打包应用并安装到 /Applications 目录\n   - 在生产环境中，SUID 设置应该可以正常工作\n\n3. 临时禁用 SIP（不推荐，仅用于测试）：\n   - 重启 Mac，按住 Command+R 进入恢复模式\n   - 打开终端，运行: csrutil disable\n   - 重启后可以设置 SUID，但会降低系统安全性\n\n4. 使用系统代理模式代替虚拟网卡模式（推荐用于开发测试）`)
-      }
-      
-      // Final verification for production environment
-      const { accessSync, constants } = await import('fs')
-      try {
-        accessSync(corePath, constants.F_OK | constants.X_OK)
-        console.error('[Manager] File exists and is executable, but SUID bit is not set')
-        
-        // Check if file is in /Applications (production environment)
-        const isProduction = corePath.startsWith('/Applications/')
-        
-        if (isProduction) {
-          throw new Error(`无法设置 SUID 位。即使应用已安装到 /Applications，macOS 系统完整性保护 (SIP) 可能仍然阻止了权限设置。\n\n请尝试以下步骤：\n\n1. 在终端中手动运行（需要管理员密码）：\n   sudo chmod +sx "${corePath}"\n\n2. 如果仍然失败，检查文件是否有隔离属性：\n   xattr -l "${corePath}"\n   如果有 com.apple.quarantine，先移除：\n   sudo xattr -d com.apple.quarantine "${corePath}"\n   然后再设置权限：\n   sudo chmod +sx "${corePath}"\n\n3. 检查 SIP 状态：\n   csrutil status\n   如果 SIP 已启用，这是正常的安全限制。\n\n4. 如果所有方法都失败，可以使用系统代理模式代替虚拟网卡模式。`)
-        } else {
-          throw new Error('无法设置 SUID 位。这可能是 macOS 系统完整性保护 (SIP) 的限制。\n\n请尝试在终端中手动运行:\nsudo chmod +sx "' + corePath + '"\n\n如果仍然失败，可能需要临时禁用 SIP 或使用系统代理模式。')
-        }
-      } catch (accessError) {
-        throw new Error(`文件不存在或不可执行: ${corePath}`)
-      }
-    } catch (error: any) {
-      console.error('[Manager] Failed to grant permission via osascript:', error)
-      const errorMessage = error?.message || String(error)
-      console.error('[Manager] Error details:', errorMessage)
-      
-      // Check if it's a user cancellation
-      if (errorMessage.includes('cancel') || errorMessage.includes('Cancel') || error.code === -128) {
-        throw new Error('用户取消了权限授予操作')
-      }
-      
-      // If error already contains our custom message, re-throw it
-      if (errorMessage.includes('开发环境限制') || errorMessage.includes('无法设置 SUID 位')) {
-        throw error
-      }
-      
-      // Check if it's a permission denied error
-      if (errorMessage.includes('Operation not permitted') || errorMessage.includes('permission denied')) {
-        if (isDevEnvironment) {
-          throw new Error(`开发环境限制：macOS 系统安全设置阻止了权限修改。\n\n这是 macOS 系统完整性保护 (SIP) 的安全限制。在开发环境中（用户目录），即使有管理员权限也无法设置 SUID 位。\n\n解决方案：\n1. 在生产环境中使用（安装到 /Applications）\n2. 或使用系统代理模式代替虚拟网卡模式\n3. 手动尝试: sudo chmod +sx "${corePath}"（可能仍然失败）`)
-        } else {
-          throw new Error(`权限授予失败: macOS 系统安全设置阻止了权限修改。\n\n可能的原因：\n1. 系统完整性保护 (SIP) 已启用\n2. 文件被其他安全机制保护\n\n解决方案：\n1. 尝试手动运行: sudo chmod +sx "${corePath}"\n2. 检查 SIP 状态: csrutil status\n3. 或者使用系统代理模式代替虚拟网卡模式`)
-        }
-      }
-      
-      // Re-throw with more context
-      throw new Error(`自动权限授予失败: ${errorMessage}\n\n请尝试在终端中手动运行:\nsudo chmod +sx "${corePath}"`)
-    }
+
+  if (manualGrantInProgress) {
+    console.log('[Manager] Permission grant already in progress, skip duplicate request')
+    return
   }
-  if (process.platform === 'linux') {
-    await execFilePromise('pkexec', [
-      'bash',
-      '-c',
-      `chown root:root "${corePath}" && chmod +sx "${corePath}"`
-    ])
+
+  manualGrantInProgress = true
+
+  try {
+    // Skip expensive flow when permission already granted
+    if (await checkCorePermission()) {
+      permissionGrantAttempted = true
+      return
+    }
+
+    if (process.platform === 'darwin') {
+      const isDevEnvironment =
+        corePath.includes('/Users/') && !corePath.startsWith('/Applications/')
+
+      if (isDevEnvironment) {
+        throw new Error(
+          `开发环境限制：无法在用户目录中设置 SUID 位。\n\n` +
+            `这是 macOS 系统完整性保护 (SIP) 的安全限制。即使有管理员权限也会失败。\n\n` +
+            `解决方案：\n` +
+            `1. 打包应用并安装到 /Applications 目录（推荐）；\n` +
+            `2. 或禁用 TUN，改用系统代理模式；\n` +
+            `3. 如需测试，可临时禁用 SIP（不推荐）。`
+        )
+      }
+
+      console.log('[Manager] Attempting to grant permission via osascript for:', corePath)
+
+      const shellEscapedPath = corePath.replace(/'/g, `'\\''`)
+      const shellCommand = `/usr/sbin/chown root:admin '${shellEscapedPath}' && /bin/chmod +sx '${shellEscapedPath}'`
+      const applescriptCommand = `do shell script "${shellCommand
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')}" with administrator privileges`
+
+      try {
+        const execFilePromise = promisify(execFile)
+        const { stdout, stderr } = await execFilePromise(
+          'osascript',
+          ['-e', applescriptCommand],
+          {
+            timeout: 30000,
+            maxBuffer: 1024 * 1024
+          }
+        )
+
+        if (stdout) {
+          console.log('[Manager] osascript stdout:', stdout.trim())
+        }
+        if (stderr && stderr.trim()) {
+          console.warn('[Manager] osascript stderr:', stderr.trim())
+        }
+      } catch (error: any) {
+        const message = error?.message || String(error)
+        console.error('[Manager] Failed to grant permission via osascript:', message)
+
+        if (message.includes('User canceled') || message.includes('(-128)')) {
+          throw new Error('用户取消了权限授予操作')
+        }
+
+        throw new Error(
+          `自动权限授予失败：${message}\n\n` +
+            `请在终端手动执行以下命令后重试：\n` +
+            `sudo chmod +sx "${corePath}"`
+        )
+      }
+
+      // Give the system a brief moment to update file metadata
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      if (!(await checkCorePermission())) {
+        throw new Error(
+          `无法设置 SUID 位，可能是 macOS 系统完整性保护 (SIP) 阻止了权限修改。\n\n` +
+            `请手动运行：\n` +
+            `sudo chown root:admin "${corePath}" && sudo chmod +sx "${corePath}"\n\n` +
+            `若仍然失败，请检查 SIP 状态 (csrutil status)，或使用系统代理模式。`
+        )
+      }
+
+      console.log('[Manager] Permission granted successfully')
+    } else if (process.platform === 'linux') {
+      const execFilePromise = promisify(execFile)
+      await execFilePromise('pkexec', [
+        'bash',
+        '-c',
+        `chown root:root "${corePath}" && chmod +sx "${corePath}"`
+      ])
+    }
+  } finally {
+    manualGrantInProgress = false
+    permissionGrantAttempted = true
   }
 }
 
