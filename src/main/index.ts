@@ -14,7 +14,7 @@ import {
 } from 'electron'
 import os from 'os'
 import { addOverrideItem, addProfileItem, getAppConfig } from './config'
-import { quitWithoutCore, startCore, stopCore, restartCore, checkCorePermission } from './core/manager'
+import { quitWithoutCore, startCore, stopCore, restartCore, checkCorePermission, manualGrantCorePermition } from './core/manager'
 import { triggerSysProxy, disableSysProxy } from './sys/sysproxy'
 import icon from '../../resources/icon.png?asset'
 import { createTray, updateTrayIconBrightness } from './resolve/tray'
@@ -1084,7 +1084,15 @@ app.whenReady().then(async () => {
         const hasPermission = await checkCorePermission()
         console.log('[Main] Current permission status:', hasPermission)
         if (!hasPermission) {
-          console.log('[Main] No SUID permission, will try to grant during start')
+          console.log('[Main] No SUID permission detected, will attempt to grant during core start')
+          // Try to grant permission proactively before starting core
+          try {
+            await manualGrantCorePermition()
+            console.log('[Main] Permission granted proactively')
+          } catch (permError) {
+            console.warn('[Main] Proactive permission grant failed, will retry during core start:', permError?.message)
+            // Don't fail here, let the core start process handle it
+          }
         }
       }
       

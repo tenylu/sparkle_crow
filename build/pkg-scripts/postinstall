@@ -26,10 +26,53 @@ fi
 
 echo "Found app bundle: $APP_BUNDLE" >&2
 
-chown root:admin "$APP_BUNDLE/Contents/Resources/sidecar/mihomo" 2>/dev/null || true
-chown root:admin "$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha" 2>/dev/null || true
-chmod +s "$APP_BUNDLE/Contents/Resources/sidecar/mihomo" 2>/dev/null || true
-chmod +s "$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha" 2>/dev/null || true
+# Set permissions for mihomo binaries
+# First, remove quarantine attributes if present
+xattr -d com.apple.quarantine "$APP_BUNDLE/Contents/Resources/sidecar/mihomo" 2>/dev/null || true
+xattr -d com.apple.quarantine "$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha" 2>/dev/null || true
+
+# Try to set ownership and SUID bit
+# Note: chown may fail due to SIP, but chmod +s should work in /Applications
+MIHOMO_PATH="$APP_BUNDLE/Contents/Resources/sidecar/mihomo"
+MIHOMO_ALPHA_PATH="$APP_BUNDLE/Contents/Resources/sidecar/mihomo-alpha"
+
+if [ -f "$MIHOMO_PATH" ]; then
+    echo "Setting permissions for mihomo..." >&2
+    # Try chown first (may fail, but that's OK)
+    chown root:admin "$MIHOMO_PATH" 2>/dev/null || chown root:wheel "$MIHOMO_PATH" 2>/dev/null || true
+    # Set SUID bit (this is the critical part)
+    chmod +sx "$MIHOMO_PATH" 2>/dev/null || {
+        echo "Warning: Failed to set SUID bit for mihomo. This may be due to SIP restrictions." >&2
+        # Try without SUID, just make it executable
+        chmod +x "$MIHOMO_PATH" 2>/dev/null || true
+    }
+    # Verify permissions
+    if [ -x "$MIHOMO_PATH" ]; then
+        PERMS=$(ls -l "$MIHOMO_PATH" | awk '{print $1}')
+        if echo "$PERMS" | grep -q 's'; then
+            echo "SUID bit set successfully for mihomo" >&2
+        else
+            echo "Warning: SUID bit not set for mihomo (permissions: $PERMS)" >&2
+        fi
+    fi
+fi
+
+if [ -f "$MIHOMO_ALPHA_PATH" ]; then
+    echo "Setting permissions for mihomo-alpha..." >&2
+    chown root:admin "$MIHOMO_ALPHA_PATH" 2>/dev/null || chown root:wheel "$MIHOMO_ALPHA_PATH" 2>/dev/null || true
+    chmod +sx "$MIHOMO_ALPHA_PATH" 2>/dev/null || {
+        echo "Warning: Failed to set SUID bit for mihomo-alpha. This may be due to SIP restrictions." >&2
+        chmod +x "$MIHOMO_ALPHA_PATH" 2>/dev/null || true
+    }
+    if [ -x "$MIHOMO_ALPHA_PATH" ]; then
+        PERMS=$(ls -l "$MIHOMO_ALPHA_PATH" | awk '{print $1}')
+        if echo "$PERMS" | grep -q 's'; then
+            echo "SUID bit set successfully for mihomo-alpha" >&2
+        else
+            echo "Warning: SUID bit not set for mihomo-alpha (permissions: $PERMS)" >&2
+        fi
+    fi
+fi
 
 NEW_SYSPROXY="$APP_BUNDLE/Contents/Resources/files/sysproxy"
 OLD_SYSPROXY="/Library/PrivilegedHelperTools/sparkle.helper"

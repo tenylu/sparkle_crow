@@ -1262,7 +1262,15 @@ export async function manualGrantCorePermition(): Promise<void> {
       try {
         accessSync(corePath, constants.F_OK | constants.X_OK)
         console.error('[Manager] File exists and is executable, but SUID bit is not set')
-        throw new Error('无法设置 SUID 位。这可能是 macOS 系统完整性保护 (SIP) 的限制。\n\n请尝试在终端中手动运行:\nsudo chmod +sx "' + corePath + '"\n\n如果仍然失败，可能需要临时禁用 SIP 或使用系统代理模式。')
+        
+        // Check if file is in /Applications (production environment)
+        const isProduction = corePath.startsWith('/Applications/')
+        
+        if (isProduction) {
+          throw new Error(`无法设置 SUID 位。即使应用已安装到 /Applications，macOS 系统完整性保护 (SIP) 可能仍然阻止了权限设置。\n\n请尝试以下步骤：\n\n1. 在终端中手动运行（需要管理员密码）：\n   sudo chmod +sx "${corePath}"\n\n2. 如果仍然失败，检查文件是否有隔离属性：\n   xattr -l "${corePath}"\n   如果有 com.apple.quarantine，先移除：\n   sudo xattr -d com.apple.quarantine "${corePath}"\n   然后再设置权限：\n   sudo chmod +sx "${corePath}"\n\n3. 检查 SIP 状态：\n   csrutil status\n   如果 SIP 已启用，这是正常的安全限制。\n\n4. 如果所有方法都失败，可以使用系统代理模式代替虚拟网卡模式。`)
+        } else {
+          throw new Error('无法设置 SUID 位。这可能是 macOS 系统完整性保护 (SIP) 的限制。\n\n请尝试在终端中手动运行:\nsudo chmod +sx "' + corePath + '"\n\n如果仍然失败，可能需要临时禁用 SIP 或使用系统代理模式。')
+        }
       } catch (accessError) {
         throw new Error(`文件不存在或不可执行: ${corePath}`)
       }
