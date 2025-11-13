@@ -23,6 +23,23 @@ export const TunToggle: React.FC = () => {
       const res = await window.api.xboard.setTun(next)
       if (res?.success) {
         setEnable(next)
+      } else if (res?.message) {
+        // Show error message to user
+        const errorMsg = res.message
+        // Check if it's a development environment restriction
+        if (errorMsg.includes('开发环境限制') || errorMsg.includes('无法在用户目录中设置 SUID')) {
+          // Don't show alert for dev environment - the main process already showed a dialog
+          console.warn('[TunToggle] Development environment restriction:', errorMsg)
+        } else {
+          // Show other errors
+          alert(errorMsg)
+        }
+      }
+    } catch (error: any) {
+      console.error('[TunToggle] Error toggling TUN:', error)
+      const errorMsg = error?.message || String(error)
+      if (!errorMsg.includes('开发环境限制')) {
+        alert(`操作失败: ${errorMsg}`)
       }
     } finally {
       setLoading(false)
